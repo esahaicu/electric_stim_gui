@@ -1,0 +1,77 @@
+def create_dat_file(file_path, channels_data):
+    with open(file_path, 'w') as file:
+        # Write header information
+        file.write("Multi Channel Systems MC_Stimulus II\n")
+        file.write("ASCII import Version 1.10\n\n")
+        file.write(f"channels:\t{len(channels_data)}\n")
+        file.write("output mode:\tcurrent\n")
+        file.write("format:\t5\n\n")
+        
+        # Iterate over each channel and its data
+        for channel, data in channels_data.items():
+            file.write(f"channel: {channel}\n")
+            file.write("pulse\tvalue\tvalue\ttime\n")
+            for row in data:
+                file.write(f"{row['pulse']}\t{row['value1']}\t{row['value2']}\t{row['time']}\n")
+            file.write("\n")  # Add an empty line after each channel's data
+
+def channel_data(waveform, amplitude, pulse_duration, frequency, total_trains, time_between_trains, external_signal_dur, delay_from_stim):
+    channels_data = {1: [], 3: []}  # Using channel 3 instead of 9
+    
+    # Helper function to add pulse data, formatting value1 and value2 as strings with three decimal places
+    def add_pulse_data(channel, pulse, value1, value2, time):
+        channels_data[channel].append({
+            "pulse": pulse,
+            "value1": "%.3f" % value1,
+            "value2": "%.3f" % value2,
+            "time": time  # Leave time as calculated or assigned
+        })
+    
+    # Initial delay for channel 1 and initial signal for channel 3
+    add_pulse_data(1, 0, 0.000, 0.000, 5050)  # Initial delay for channel 1
+    add_pulse_data(3, 0, 0.000, 1.000, 5000)  # Initial 5000 time unit on signal for channel 3
+    add_pulse_data(3, 0, 0.000, 0.000, 50)    # Followed by 50 time unit off signal for channel 3
+    
+    # Calculate pulse time based on waveform
+    if waveform == "sinusoidal":
+        pulse_time = 1 / frequency
+        pulse = 2
+    else:  # monophasic or biphasic
+        pulse_time = pulse_duration
+        pulse = 0
+    
+    for train in range(total_trains):
+        # Channel 1
+        if waveform == "monophasic":
+            add_pulse_data(1, pulse, 0.000, amplitude, pulse_time)
+        elif waveform == "biphasic":
+            add_pulse_data(1, pulse, 0.000, amplitude, 0.5 * pulse_duration)
+            add_pulse_data(1, pulse, 0.000, -amplitude, 0.5 * pulse_duration)
+        elif waveform == "sinusoidal":
+            add_pulse_data(1, pulse, 0.000, amplitude, pulse_time)
+        
+        # Rest period after each train for channel 1
+        rest_time = time_between_trains - pulse_time if waveform != "sinusoidal" else time_between_trains - 1 / frequency
+        add_pulse_data(1, 0, 0.000, 0.000, rest_time)
+        
+        # Channel 3 - Delay from stim and external signal duration for each train
+        if train == 0:  # Only add delay for the first train
+            add_pulse_data(3, 0, 0.000, 0.000, delay_from_stim)
+        add_pulse_data(3, 0, 0.000, 1.000, external_signal_dur)
+        
+        # Rest period after external signal for channel 3
+        rest_time_3 = time_between_trains - external_signal_dur - delay_from_stim
+        add_pulse_data(3, 0, 0.000, 0.000, rest_time_3)
+    
+    return channels_data
+
+
+
+# Example data for channels, replace with your actual data
+channels_data = channel_data("monophasic", 200, 100, 0, 1, 1, 0,0)
+
+# Specify the file path where you want to save the .dat file
+output_file_path = "/Users/eashan/DenmanLab/stg5_try/test_output_vals.dat"
+
+# Call the function to create the file
+create_dat_file(output_file_path, channels_data)
