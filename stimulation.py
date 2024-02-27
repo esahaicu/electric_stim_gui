@@ -5,7 +5,7 @@ import clr
 from System import Action
 from System import *
 
-clr.AddReference(os.getcwd() + '\\..\\..\\McsUsbNet\\x64\\\McsUsbNet.dll')
+clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
 from Mcs.Usb import CMcsUsbListNet
 from Mcs.Usb import DeviceEnumNet
 
@@ -43,7 +43,7 @@ channelmap = Array[UInt32]([1,0,0,0])
 syncoutmap = Array[UInt32]([1,0,0,0])
 repeat = Array[UInt32]([10,0,0,0])
 
-amplitude = Array[Int32]([-5000,5000,0]);
+amplitude = Array[Int32]([-2500,2500,0]);
 duration = Array[UInt64]([100,100,1000000]);
 
 device.SetupTrigger(0, channelmap, syncoutmap, repeat)

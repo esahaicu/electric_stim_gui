@@ -14,7 +14,9 @@ import clr
 from System import Action
 from System import *
 
-clr.AddReference(os.getcwd() + '\\..\\..\\McsUsbNet\\x64\\\McsUsbNet.dll')
+#change this path to the McsUsbNet for your computer
+clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+
 from Mcs.Usb import CMcsUsbListNet
 from Mcs.Usb import DeviceEnumNet
 
@@ -35,7 +37,7 @@ class PipelineStage(param.Parameterized):
 
 # Stimulation Parameters with pipeline-like dependencies
 class StimulationParameters(PipelineStage):
-    waveform = param.Selector(default='Monophasic', objects=['Monophasic', 'Biphasic', 'Sinusoidal'], label='Choose Waveform: ')
+    waveform = param.Selector(default='Biphasic', objects=['Monophasic', 'Biphasic', 'Sinusoidal'], label='Choose Waveform: ')
     volt_or_curr = param.Selector(default='Current', objects=['Current', 'Voltage'], precedence = 0, label='Current or Voltage: ')
     amplitude = param.Number(default=0, label = 'Set Amplitude (uA or uV): ')
     pulse_duration = param.Number(default=100, step=1, label="Set Pulse Duration (us)")
@@ -106,8 +108,8 @@ class StimulationParameters(PipelineStage):
 # Trigger Parameters with pipeline-like dependencies
 class TriggerParameters(PipelineStage):
     allow_external = param.Boolean(False, label='Allow For External Trigger?')
-    total_trains = param.Number(default=1, precedence=1, label='Total Number of Trains: ')
-    time_between_trains = param.Number(default=1, precedence=1, label = 'Time Between Each Train (ms):')
+    total_trains = param.Number(default=50, precedence=1, label='Total Number of Trains: ')
+    time_between_trains = param.Number(default=2000, precedence=1, label = 'Time Between Each Train (ms):')
 
     @param.depends('allow_external', watch=True)
     def _update_fields(self):
