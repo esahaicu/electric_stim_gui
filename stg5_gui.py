@@ -424,10 +424,12 @@ class OutputDisplay(param.Parameterized):
             if volt_or_curr == 'Current':
                 device.SetCurrentMode()
                 print('Current Mode')
+                device.PrepareAndSendData(0, amplitude, duration, STG_DestinationEnumNet.channeldata_current)
             else:
                 device.SetVoltageMode()
                 print('Voltage Mode')
-            device.PrepareAndSendData(0, amplitude, duration, STG_DestinationEnumNet.channeldata_voltage)
+                device.PrepareAndSendData(0, amplitude, duration, STG_DestinationEnumNet.channeldata_voltage)
+
             device.PrepareAndSendData(0, syncout, syncout_dur, STG_DestinationEnumNet.syncoutdata)
             device.PrepareAndSendData(1, syncout_start, syncout_start_dur, STG_DestinationEnumNet.syncoutdata)
             print('Starting!')
