@@ -1,3 +1,13 @@
+"""
+TITLE: STG5 GUI
+DESIGNED BY EASHAN SAHAI
+GOAL: USE PYTHON AND A PANEL GUI TO CONTROL ALL FUNCTIONALITY OF THE MCS STG5
+NOTES:
+The following program uses Panel to allow the users to control the basic Stimulation
+Parameters in a given train, the number of trains, delay between trains, and external
+signal sent from a given channel
+"""
+
 import param
 import panel as pn
 import numpy as np
