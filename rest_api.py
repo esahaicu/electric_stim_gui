@@ -4,6 +4,7 @@ import gpiozero
 import random
 import time
 import sys
+from signal import pause
 
 # Import your GPIO control and setup functions here
 # from your_gpio_module import SimulatedGPIO, init_gpio_devices, setup_and_latch
@@ -68,7 +69,7 @@ def init_gpio_devices():
         )
 
 def setup_and_latch():
-    oe_device.off()
+    oe_device.on()
     for cgroup in range(0,4):
         le_pin = le_gpio_pins[cgroup]
         le_device=le_gpio_devices[cgroup]
@@ -94,7 +95,7 @@ def setup_and_latch():
         le_device.on()
         time.sleep(0.001)
         le_device.off()
-    oe_device.on()
+    oe_device.off()
 
 # Initialize GPIO devices
 init_gpio_devices()
@@ -102,14 +103,14 @@ init_gpio_devices()
 # Initially, set all channels to Floating (F)
 channel_state = ["F"] * 16
 
-@app.route('/api/set_channel', methods=['POST'])
+@app.route('/api/set_channel', methods=['GET'])
 def set_channel():
-    data = request.json
-    channel = request.args.get('channel')
+    channel = int(request.args.get('channel'))-1
     signal = request.args.get('signal')
+    print(f'C{channel}, S{signal}')
 
     # Validate the input
-    if not (0 <= channel < 16):
+    if not (0 <= int(channel) < 16):
         return jsonify({f'error': '{channel} is not a valid channel'}), 400
     if signal not in ['A', 'C', 'G', 'F']:
         return jsonify({f'error': '{signal} is not a valid signal'}), 400
@@ -117,7 +118,6 @@ def set_channel():
     channel_state[channel] = signal
     # Apply changes
     setup_and_latch()
-
     return jsonify({'message': f'Channel {channel + 1} set to {signal}'}), 200
 
 @app.route('/api/set_all', methods=['GET'])
@@ -136,7 +136,6 @@ def set_all_channels():
 
     # Apply changes
     setup_and_latch()
-
     return jsonify({'message': f'All channels set to {channel_state}'}), 200
 
 @app.route('/api/status', methods=['GET'])
