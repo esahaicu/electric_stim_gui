@@ -3,6 +3,7 @@ from panel.widgets import CheckButtonGroup, Button
 import gpiozero
 import random
 import time
+import sys
 
 class SimulatedGPIO:
     @staticmethod
@@ -20,7 +21,7 @@ channel_state = [None] * 16
 oe_pin = 22
 oe_device = None
 
-le_gpio_pins = [ 23,24, 25, 27 ]
+le_gpio_pins = [ 23, 24, 25, 27 ]
 le_gpio_devices = [ ]
 
 def chan_to_le(chan):
@@ -28,22 +29,21 @@ def chan_to_le(chan):
 
 
 state2pin_logic_map = {
-    "C" : [1, 0 ],
+    "C" : [ 1, 0 ],
     "A" : [ 0, 1 ],
-    "G" : [ 1, 1 ]
+    "G" : [ 1, 1 ],
+    "F" : [ 0, 0 ]
 }
 
 
 sp3t_selector_gpio_pins = [
-    [5,6 ],
+    [5, 6],
     [12, 13],
-    [16, 19],
-    [20, 21]
+    [16, 17],
+    [19, 26]
 ]
 
-sp3t_selector_gpio_devices = [
-    
-]
+sp3t_selector_gpio_devices = []
 
 
 
@@ -55,44 +55,53 @@ def chan_to_sp3t(chan):
 def init_gpio_devices():
     global oe_device
     oe_device= gpiozero.DigitalOutputDevice(oe_pin)
-    for inx in range(3):
+    for inx in range(4):
         pins = sp3t_selector_gpio_pins[inx]
         sp3t_selector_gpio_devices.append([
             gpiozero.DigitalOutputDevice(pins[0]),
             gpiozero.DigitalOutputDevice(pins[1])
         ])
-        le_gpio_devices.append([
+        le_gpio_devices.append(
             gpiozero.DigitalOutputDevice(le_gpio_pins[inx])
-        ])
+        )
 
 def setup_and_latch():
     oe_device.off()
-    for cgroup in range(1,5):
-        for rch in range(1, 5):
-            channel = cgroup * rch
-            state = channel_state[channel -1]
+    for cgroup in range(0,4):
+        le_pin = le_gpio_pins[cgroup]
+        le_device=le_gpio_devices[cgroup]
+        for rch in range(0, 4):
+            channel = cgroup * 4 + rch
+            state = channel_state[channel]
             sp3t_logic_values = state2pin_logic_map[state]
+            print(f'{state= } {sp3t_logic_values= }')
             sp3t = ""
-            for inx, device in enumerate(sp3t_selector_gpio_devices):
-                sp3t_pin = sp3t_selector_gpio_pins[inx]
-                logic = sp3t_logic_values[inx]
-                sp3t += f' GPIO{sp3t_pin} = {logic}'
-                if logic == 1:
+            #print("SP3T selector devies: ", sp3t_selector_gpio_devices[rch])
+            for inx, device in enumerate(sp3t_selector_gpio_devices[rch]):
+                sp3t_pins = sp3t_selector_gpio_pins[rch]
+                logic = sp3t_logic_values
+                #print(sp3t_pins, logic)
+                sp3t += f' GPIO{sp3t_pins} = {logic}'
+                if logic[inx] == 1:
                     device.on()
                 else:
                     device.off()
-            le_inx = chan_to_le(channel)
-            le_pin = le_gpio_pins[le_inx]
-            le_device=le_gpio_devices[le_inx]
-            print(f'Setting {channel = }  {state = }, {le_inx = } {le_pin = } {sp3t}')
-            time.sleep(0.001)
-            le_device.off()
+                print(f'Setting {channel = }  {state = }, {cgroup = } {le_pin = } {sp3t}')
+            
+       
+        le_device.on()
+        time.sleep(0.001)
+        le_device.off()
     oe_device.on()
 
 def main():
     init_gpio_devices()
+    if len(sys.argv) == 2:
+        ch_val=sys.argv[1]
+    else:
+        ch_val = None
     for i in range(16):
-        channel_state[i] = random.choice("A", "C","G")
+        channel_state[i] = ch_val if ch_val is not None else random.choice(["A", "C","G","F"])
     print(f'{channel_state = }')
     setup_and_latch()
     
