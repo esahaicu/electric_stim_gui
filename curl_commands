@@ -1,0 +1,10 @@
+#CHANGE ONE CHANNEL
+curl -X POST http://localhost:5000/api/set_channel \
+-H "Content-Type: application/json" \
+-d '{"channel": 1, "signal": "A"}'
+
+#CHANGE ALL CHANNELS
+curl -X GET "http://localhost:5000/api/set_all?signal=CAGFCAGFCAGFCAGF"
+
+#GET STATUS
+curl http://localhost:5000/api/status
