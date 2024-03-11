@@ -4,8 +4,8 @@ import gpiozero
 import random
 import time
 import sys
-import os
-os.environ['GPIOZERO_PIN_FACTORY'] = os.environ.get('GPIOZERO_PIN_FACTORY', 'mock')
+#import os
+#os.environ['GPIOZERO_PIN_FACTORY'] = os.environ.get('GPIOZERO_PIN_FACTORY', 'mock')
 
 # Import your GPIO control and setup functions here
 # from your_gpio_module import SimulatedGPIO, init_gpio_devices, setup_and_latch
