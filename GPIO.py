@@ -66,7 +66,7 @@ def init_gpio_devices():
         )
 
 def setup_and_latch():
-    oe_device.off()
+    oe_device.on()
     for cgroup in range(0,4):
         le_pin = le_gpio_pins[cgroup]
         le_device=le_gpio_devices[cgroup]
@@ -92,7 +92,7 @@ def setup_and_latch():
         le_device.on()
         time.sleep(0.001)
         le_device.off()
-    oe_device.on()
+    oe_device.off()
 
 def main():
     init_gpio_devices()
@@ -108,7 +108,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    time.sleep(100)
 
 """
 def set_electrode_state(electrode_num, state):
