@@ -102,12 +102,14 @@ def main():
     #    ch_val = None
     #for i in range(16):
     #    channel_state[i] = ch_val if ch_val is not None else random.choice(["A", "C","G","F"])
-    channel_state = ["C","A","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
-    print(f'{channel_state = }')
-    setup_and_latch()
-    channel_state = ["G","G","C","A","G","G","G","G","G","G","G","G","G","G","G","G"]
-    print(f'{channel_state = }')
-    setup_and_latch()
+    for _ in range(20):
+        channel_state = ["C","A","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
+        print(f'{channel_state = }')
+        setup_and_latch()
+        channel_state = ["G","G","C","A","G","G","G","G","G","G","G","G","G","G","G","G"]
+        print(f'{channel_state = }')
+        setup_and_latch()
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     main()
