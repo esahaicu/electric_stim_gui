@@ -96,15 +96,18 @@ def setup_and_latch():
 
 def main():
     init_gpio_devices()
-    if len(sys.argv) == 2:
-        ch_val=sys.argv[1]
-    else:
-        ch_val = None
-    for i in range(16):
-        channel_state[i] = ch_val if ch_val is not None else random.choice(["A", "C","G","F"])
+    #if len(sys.argv) == 2:
+    #    ch_val=sys.argv[1]
+    #else:
+    #    ch_val = None
+    #for i in range(16):
+    #    channel_state[i] = ch_val if ch_val is not None else random.choice(["A", "C","G","F"])
+    channel_state = ["C","A","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
     print(f'{channel_state = }')
     setup_and_latch()
-    
+    channel_state = ["G","G","C","A","G","G","G","G","G","G","G","G","G","G","G","G"]
+    print(f'{channel_state = }')
+    setup_and_latch()
 
 if __name__ == "__main__":
     main()
