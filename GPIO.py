@@ -51,7 +51,10 @@ def chan_to_sp3t(chan):
     return int((chan-1)/4)
 
 # UI sets channel_state array values to A/C/G#thencalls the folllwing routine
-
+def precise_sleep(delay):
+    target = time.perf_counter_ns() + delay * 1000
+    while time.perf_counter_ns() < target:
+        pass
 def init_gpio_devices():
     global oe_device
     oe_device= gpiozero.DigitalOutputDevice(oe_pin)
@@ -90,7 +93,7 @@ def setup_and_latch():
             
        
         le_device.on()
-        time.sleep(0.001)
+        precise_sleep(1000)
         le_device.off()
     oe_device.off()
 
@@ -102,75 +105,23 @@ def main():
     #    ch_val = None
     #for i in range(16):
     #    channel_state[i] = ch_val if ch_val is not None else random.choice(["A", "C","G","F"])
-    for _ in range(20):
+    for i in range(20):
+        channel_state = ["G","G","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
+        print(f'{channel_state = }')
+        precise_sleep(500000)
         channel_state = ["C","A","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
         print(f'{channel_state = }')
         setup_and_latch()
+        precise_sleep(i*1000)
         channel_state = ["G","G","C","A","G","G","G","G","G","G","G","G","G","G","G","G"]
         print(f'{channel_state = }')
         setup_and_latch()
-        time.sleep(0.5)
+        precise_sleep(i*1000)
+        channel_state = ["G","G","G","G","G","G","G","G","G","G","G","G","G","G","G","G"]
+        print(f'{channel_state = }')
+        precise_sleep(500000)
+
 
 if __name__ == "__main__":
     main()
     time.sleep(100)
-
-"""
-def set_electrode_state(electrode_num, state):
-    if electrode_num not in electrode_mappings:
-        print("Invalid electrode number")
-        return
-    
-    if state not in electrode_mappings[electrode_num]:
-        print("Invalid state")
-        return
-    
-    ground_pins = electrode_mappings[electrode_num]["G"]
-    for pin in ground_pins:
-        GPIO.setup(pin, "OUTPUT")
-        GPIO.output(pin, True)
-    
-    # Get the LE pin for this electrode
-    le_group = (electrode_num - 1) // 4 + 1
-    le_pin = LE_pins[le_group]
-    
-    oe_pin = "GP22"
-    
-    state_pins = electrode_mappings[electrode_num][state]
-    
-    GPIO.setup(le_pin, "OUTPUT")
-    GPIO.output(le_pin, True)
-    
-    GPIO.setup(oe_pin, "OUTPUT")
-    GPIO.output(oe_pin, True)
-    
-    for pin in state_pins:
-        GPIO.setup(pin, "OUTPUT")
-        GPIO.output(pin, True)
-
-electrode_selector = pn.widgets.Select(name='Select Electrode Pin', options=list(range(1, 17)))
-
-state_selector = CheckButtonGroup(name='Select State', options=['C', 'A', 'G'])
-
-apply_button = Button(name="Apply Configuration", button_type="primary")
-
-def apply_configuration(event):
-    electrode_num = electrode_selector.value
-    
-    for state in state_selector.value:
-        set_electrode_state(electrode_num, state)
-        break
-
-def update_checkbox_group(attr, old, new):
-    if len(new) > 1:
-        state_selector.value = [new[-1]]
-
-state_selector.param.watch(update_checkbox_group, 'value')
-
-apply_button.on_click(apply_configuration)
-
-layout = pn.Column(pn.Row(electrode_selector, state_selector),apply_button)
-
-layout.servable()
-pn.serve(layout)
-"""
