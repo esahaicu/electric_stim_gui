@@ -26,21 +26,20 @@ pn.extension('katex')
 class PipelineStage(param.Parameterized):
     @staticmethod
     def update_output(*args, **kwargs):
-        # Placeholder method to be overridden for updating the output tab
         pass
 
 # Define a class for configuring stimulation parameters
 class StimulationParameters(PipelineStage):
     # Define selectable options and default values for parameters
     waveform = param.Selector(default='Biphasic', objects=['Monophasic', 'Biphasic', 'Sinusoidal'], label='Choose Waveform: ')
-    volt_or_curr = param.Selector(default='Current', objects=['Current', 'Voltage'], precedence=0, label='Current or Voltage: ')
-    amplitude = param.Number(default=0, label='Set Amplitude (uA or uV): ')
+    volt_or_curr = param.Selector(default='Current', objects=['Current', 'Voltage'], precedence = 0, label='Current or Voltage: ')
+    amplitude = param.Number(default=0, label = 'Set Amplitude (uA or uV): ')
     pulse_duration = param.Number(default=100, step=1, label="Set Pulse Duration (us)")
-    frequency_or_period_choice = param.Selector(default="Frequency", objects=["Frequency", "Period"], precedence=-1, label='Choose Frequency (Hz) or Period (ms): ')
-    frequency_period_value = param.Number(default=1.0, step=0.00001, precedence=-1, label='Frequency/Period Value: ')
-    phase = param.String(default='Neither', label='Phase Chosen: ')
-    frequency = param.Number(default=0, bounds=(0, None), label='Current Frequency (Hz): ')
-    period = param.Number(default=0, bounds=(0, None), label='Current Period (ms): ')
+    frequency_or_period_choice = param.Selector(default="Frequency", objects=["Frequency", "Period"], precedence=-1, label = 'Choose Frequency (Hz) or Period (ms): ')  # Visibility controlled by waveform and amplitude
+    frequency_period_value = param.Number(default=1.0, step=0.00001, precedence=-1, label = 'Frequency/Period Value: ')  # Visibility controlled by waveform and amplitude, bounds adjusted
+    phase = param.String(default='Neither', label = 'Phase Chosen: ')  # Updated based on amplitude
+    frequency = param.Number(default=0, bounds=(0, None), label='Current Frequency (Hz): ')  # Dynamically calculated, visibility controlled
+    period = param.Number(default=0, bounds=(0, None), label = 'Current Period (ms): ')  # Dynamically calculated, visibility controlled
 
     def __init__(self, **params):
         super().__init__(**params)
@@ -75,9 +74,9 @@ class StimulationParameters(PipelineStage):
         self.param.frequency_period_value.precedence = 1 if is_sinusoidal else -1
         self.param.pulse_duration.precedence = -1 if is_sinusoidal else 1
         # Update visibility of parameters based on waveform selection
-        self.param['phase'].precedence = 1 if self.waveform == 'Biphasic' else -1  # Only show 'Phase' for Biphasic waveform
-        self.param['frequency'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Only show 'Frequency' for Sinusoidal waveform
-        self.param['period'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Only show 'Period' for Sinusoidal waveform
+        self.param['phase'].precedence = 1 if self.waveform == 'Biphasic' else -1  # Hide phase if not Biphasic
+        self.param['frequency'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Hide phase if not Sinusoidal
+        self.param['period'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Hide phase if not Sinusoidal
 
     # Define method for generating the GUI layout for stimulation parameters
     @param.depends('waveform', 'volt_or_curr', 'amplitude', 'frequency_or_period_choice', 'frequency_period_value', watch=True)
@@ -86,15 +85,12 @@ class StimulationParameters(PipelineStage):
         vc_widget = pn.widgets.RadioButtonGroup(name='Current or Voltage', options=self.param['volt_or_curr'].objects, value=self.volt_or_curr)
         amplitude_widget = pn.widgets.FloatInput(name='Amplitude (uA)', value=self.amplitude, step=1)
         phase_display = pn.pane.Markdown(f"**Phase:** {self.phase}", visible=self.waveform == 'Biphasic' and self.amplitude != 0)
-        
         # Widgets for selecting frequency or period based on the waveform type
         frequency_or_period_widget = pn.widgets.RadioButtonGroup(name='Frequency or Period', options=['Frequency', 'Period'], value=self.frequency_or_period_choice, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-        frequency_period_value_widget = pn.widgets.FloatInput(name='Frequency/Period Value', value=self.frequency_period_value, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-        
+        frequency_period_value_widget = pn.widgets.FloatInput(name='Frequency/Period Value', value=self.frequency_period_value, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)        
         # Displays for showing the calculated frequency and period
         frequency_display = pn.pane.Markdown(f"**Frequency:** {self.frequency} Hz", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
         period_display = pn.pane.Markdown(f"**Period:** {self.period} ms", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-
         # Combine all the widgets into a column layout
         return pn.Column(
             waveform_widget,
@@ -103,7 +99,7 @@ class StimulationParameters(PipelineStage):
             phase_display,
             frequency_or_period_widget,
             frequency_period_value_widget,
-            pn.layout.Spacer(height=10),  # Add space for clarity
+            pn.layout.Spacer(height=10),  # Add space before frequency/period displays
             frequency_display,
             period_display
         )
