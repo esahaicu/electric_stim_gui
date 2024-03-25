@@ -456,33 +456,45 @@ class MainGUI(param.Parameterized):
     def __init__(self, **params):
         super(MainGUI, self).__init__(**params)
         
-        # Initialize parameter classes
-        self.stimulation_params = StimulationParameters()
-        self.trigger_params = TriggerParameters()
-        self.external_signal_params = ExternalSignal()
-
-        # OutputDisplay now needs to be aware of the other classes to display their current states
-        self.output_display = OutputDisplay(stimulation_params=self.stimulation_params, 
+        # Pass self (MainGUI instance) to component classes
+        self.stimulation_params = StimulationParameters(main_gui=self)
+        self.trigger_params = TriggerParameters(main_gui=self)
+        self.external_signal_params = ExternalSignal(main_gui=self)
+        self.output_display = OutputDisplay(main_gui=self, stimulation_params=self.stimulation_params, 
                                              trigger_params=self.trigger_params, 
                                              external_signal_params=self.external_signal_params)
 
-        # Set up the Panel tabs
         self.tabs = self.setup_tabs()
 
     def setup_tabs(self):
-        # Assemble tabs with views from each class
-        tabs = pn.Tabs(
+        return pn.Tabs(
             ('Stimulation Parameters', self.stimulation_params.view()),
             ('Trigger Parameters', self.trigger_params.view()),
             ('External Signal', self.external_signal_params.view()),
-            ('Output', self.output_display.view())  # Assumes that `view` is a method that returns a Panel object
+            ('Output', self.output_display.view())
         )
-        return tabs
+
+    def refresh_view(self):
+        self.stimulation_params.update_output()
+        self.trigger_params.update_output()
+        self.external_signal_params.update_output()
+        self.output_display.update_output()
+
+        # Now, update the tabs with the refreshed views
+        self.tabs.clear()  # First, clear the existing tabs
+        # Then, recreate the tabs with updated views
+        self.tabs.extend([
+            ('Stimulation Parameters', self.stimulation_params.view()),
+            ('Trigger Parameters', self.trigger_params.view()),
+            ('External Signal', self.external_signal_params.view()),
+            ('Output', self.output_display.view())
+        ])
+
 
     def servable(self):
-        # Make the tabs servable as the main app entry point
         return self.tabs.servable()
 
-# Instantiate and serve the main GUI
+# Assuming the component classes are defined correctly and include a reference to MainGUI
+# And assuming each component class correctly calls self.main_gui.refresh_view() when their state changes
 main_gui = MainGUI()
 main_gui.servable()
