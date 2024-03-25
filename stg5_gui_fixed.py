@@ -80,21 +80,20 @@ class StimulationParameters(PipelineStage):
         self.param['period'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Only show 'Period' for Sinusoidal waveform
 
     # Define method for generating the GUI layout for stimulation parameters
+    @param.depends('waveform', 'volt_or_curr', 'amplitude', 'frequency_or_period_choice', 'frequency_period_value', watch=True)
     def view(self):
-        # Define widgets for the stimulation parameters section
-        is_sinusoidal = self.waveform == 'Sinusoidal' and self.amplitude != 0
         waveform_widget = pn.widgets.RadioButtonGroup(name='Waveform', options=self.param['waveform'].objects, value=self.waveform)
         vc_widget = pn.widgets.RadioButtonGroup(name='Current or Voltage', options=self.param['volt_or_curr'].objects, value=self.volt_or_curr)
         amplitude_widget = pn.widgets.FloatInput(name='Amplitude (uA)', value=self.amplitude, step=1)
         phase_display = pn.pane.Markdown(f"**Phase:** {self.phase}", visible=self.waveform == 'Biphasic' and self.amplitude != 0)
         
         # Widgets for selecting frequency or period based on the waveform type
-        frequency_or_period_widget = pn.widgets.RadioButtonGroup(name='Frequency or Period', options=['Frequency', 'Period'], value=self.frequency_or_period_choice, visible=is_sinusoidal)
-        frequency_period_value_widget = pn.widgets.FloatInput(name='Frequency/Period Value', value=self.frequency_period_value, visible=is_sinusoidal)
+        frequency_or_period_widget = pn.widgets.RadioButtonGroup(name='Frequency or Period', options=['Frequency', 'Period'], value=self.frequency_or_period_choice, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
+        frequency_period_value_widget = pn.widgets.FloatInput(name='Frequency/Period Value', value=self.frequency_period_value, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
         
         # Displays for showing the calculated frequency and period
-        frequency_display = pn.pane.Markdown(f"**Frequency:** {self.frequency} Hz", visible=is_sinusoidal)
-        period_display = pn.pane.Markdown(f"**Period:** {self.period} ms", visible=is_sinusoidal)
+        frequency_display = pn.pane.Markdown(f"**Frequency:** {self.frequency} Hz", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
+        period_display = pn.pane.Markdown(f"**Period:** {self.period} ms", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
 
         # Combine all the widgets into a column layout
         return pn.Column(
