@@ -171,6 +171,13 @@ class OutputDisplay(param.Parameterized):
         self.stimulation_params = stimulation_params
         self.trigger_params = trigger_params
         self.external_signal_params = external_signal_params
+        self.param.watch(self.update_table_data, [
+            'include_waveform', 'include_vc', 'include_amplitude', 'include_pulse_duration', 'include_phase', 
+            'include_frequency_period_value', 'include_calculated_frequency', 'include_calculated_period',
+            'include_external_triggering', 'include_total_trains', 'include_time_between_trains',
+            'include_external_signal_duration', 'include_delay_from_beginning'
+        ])
+
         # Watch for changes in parameters to update the output display accordingly
 
     def update_table_data(self, event=None):
@@ -427,6 +434,13 @@ tabs = pn.Tabs(
 )
 
 # Monitor changes in parameters across all stages to update the output display dynamically
+for stage in [stimulation_params]:
+    stage.param.watch(lambda event: stimulation_params.update_output(), list(stage.param))
+for stage in [trigger_params]:
+    stage.param.watch(lambda event: trigger_params.update_output(), list(stage.param))
+for stage in [external_signal_params]:
+    stage.param.watch(lambda event: external_signal_params.update_output(), list(stage.param))
+
 for stage in [stimulation_params, trigger_params, external_signal_params]:
     stage.param.watch(lambda event: output_display.update_table_data(), list(stage.param))
 
