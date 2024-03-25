@@ -82,6 +82,7 @@ class StimulationParameters(PipelineStage):
     # Define method for generating the GUI layout for stimulation parameters
     def view(self):
         # Define widgets for the stimulation parameters section
+        is_sinusoidal = self.waveform == 'Sinusoidal' and self.amplitude != 0
         waveform_widget = pn.widgets.RadioButtonGroup(name='Waveform', options=self.param['waveform'].objects, value=self.waveform)
         vc_widget = pn.widgets.RadioButtonGroup(name='Current or Voltage', options=self.param['volt_or_curr'].objects, value=self.volt_or_curr)
         amplitude_widget = pn.widgets.FloatInput(name='Amplitude (uA)', value=self.amplitude, step=1)
