@@ -40,12 +40,12 @@ class StimulationParameters(PipelineStage):
     phase = param.String(default='Neither', label = 'Phase Chosen: ')  # Updated based on amplitude
     frequency = param.Number(default=0, bounds=(0, None), label='Current Frequency (Hz): ')  # Dynamically calculated, visibility controlled
     period = param.Number(default=0, bounds=(0, None), label = 'Current Period (ms): ')  # Dynamically calculated, visibility controlled
-
+   
     def __init__(self, **params):
         super().__init__(**params)
         self._update_phase_text()  # Update phase text based on amplitude
         self._update_visibility()  # Update visibility of parameters based on selections
-
+        self.param.watch(self.update_output, ['waveform', 'volt_or_curr', 'amplitude', 'pulse_duration', 'frequency_or_period_choice', 'frequency_period_value'])
     @param.depends('amplitude', watch=True)
     def _update_phase_text(self):
         # Update phase text based on the sign of the amplitude
@@ -103,6 +103,14 @@ class StimulationParameters(PipelineStage):
             frequency_display,
             period_display
         )
+    def update_output(self, event):
+        # This method now contains logic to refresh the GUI components affected by parameter changes
+        # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
+        # or implement more specific logic if only parts of the view need updating
+        self._update_phase_text()
+        self._update_frequency_period()
+        self._update_visibility()
+        self.view()
 
 # Class for configuring trigger parameters
 class TriggerParameters(PipelineStage):
@@ -110,7 +118,10 @@ class TriggerParameters(PipelineStage):
     allow_external = param.Boolean(False, label='Allow For External Trigger?')
     total_trains = param.Number(default=50, precedence=1, label='Total Number of Trains: ')
     time_between_trains = param.Number(default=2000, precedence=1, label = 'Time Between Each Train (ms):')
-
+    def __init__(self, **params):
+        super().__init__(**params)
+        # Set up watchers on parameters that affect the view
+        self.param.watch(self.update_output, ['allow_external', 'total_trains', 'time_between_trains'])
     @param.depends('allow_external', watch=True)
     def _update_fields(self):
         # Toggle the visibility of total trains and time between trains based on external trigger option
@@ -120,7 +131,6 @@ class TriggerParameters(PipelineStage):
         else:
             self.param['total_trains'].precedence = 1
             self.param['time_between_trains'].precedence = 1
-
     # Generate GUI layout for trigger parameters
     def view(self):
         external_widget = pn.widgets.Toggle(name='Allow External Trigger?', button_type='success')
@@ -129,13 +139,22 @@ class TriggerParameters(PipelineStage):
 
         # Combine widgets into a layout
         return pn.Column(external_widget, total_trains_widget, time_between_trains_widget)
-
+    def update_output(self, event):
+        # This method now contains logic to refresh the GUI components affected by parameter changes
+        # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
+        # or implement more specific logic if only parts of the view need updating
+        self._update_fields()
+        self.view()
 # Class for setting up external signal parameters
 class ExternalSignal(PipelineStage):
     # Define parameters for external signal settings
     duration = param.Number(default=0.0, label='Duration of External Signal (us):')
     delay = param.Number(default=0.0, label='Delay Between External Signal and Stimulation (us):')
-    
+    def __init__(self, **params):
+        super().__init__(**params)
+        # Set up watchers on parameters that affect the view
+        self.param.watch(self.update_output, ['duration', 'delay'])
+
     # Generate GUI layout for external signal parameters
     def view(self):
         duration_widget = pn.widgets.FloatInput(name='Duration of External Signal (us)', value=self.duration)
@@ -143,6 +162,11 @@ class ExternalSignal(PipelineStage):
 
         # Combine widgets into a layout
         return pn.Column(duration_widget, delay_widget)
+    def update_output(self, event):
+        # This method now contains logic to refresh the GUI components affected by parameter changes
+        # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
+        # or implement more specific logic if only parts of the view need updating
+        self.view()
 # adapt to various experimental requirements. By using Panel widgets, the GUI is both functional and user-friendly.
 
 # Class for displaying the output and running the simulation
@@ -434,13 +458,6 @@ tabs = pn.Tabs(
 )
 
 # Monitor changes in parameters across all stages to update the output display dynamically
-for stage in [stimulation_params]:
-    stage.param.watch(lambda event: stimulation_params.update_output(), list(stage.param))
-for stage in [trigger_params]:
-    stage.param.watch(lambda event: trigger_params.update_output(), list(stage.param))
-for stage in [external_signal_params]:
-    stage.param.watch(lambda event: external_signal_params.update_output(), list(stage.param))
-
 for stage in [stimulation_params, trigger_params, external_signal_params]:
     stage.param.watch(lambda event: output_display.update_table_data(), list(stage.param))
 
