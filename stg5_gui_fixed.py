@@ -41,8 +41,9 @@ class StimulationParameters(PipelineStage):
     frequency = param.Number(default=0, bounds=(0, None), label='Current Frequency (Hz): ')  # Dynamically calculated, visibility controlled
     period = param.Number(default=0, bounds=(0, None), label = 'Current Period (ms): ')  # Dynamically calculated, visibility controlled
    
-    def __init__(self, **params):
+    def __init__(self, main_gui, **params):
         super().__init__(**params)
+        self.main_gui = main_gui
         self._update_phase_text()  # Update phase text based on amplitude
         self._update_visibility()  # Update visibility of parameters based on selections
         self.param.watch(self.update_output, ['waveform', 'volt_or_curr', 'amplitude', 'pulse_duration', 'frequency_or_period_choice', 'frequency_period_value'])
@@ -103,7 +104,7 @@ class StimulationParameters(PipelineStage):
             frequency_display,
             period_display
         )
-    def update_output(self, event):
+    def update_output(self, event=None):
         # This method now contains logic to refresh the GUI components affected by parameter changes
         # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
         # or implement more specific logic if only parts of the view need updating
@@ -111,6 +112,8 @@ class StimulationParameters(PipelineStage):
         self._update_frequency_period()
         self._update_visibility()
         self.view()
+        self.main_gui.refresh_view()
+
 
 # Class for configuring trigger parameters
 class TriggerParameters(PipelineStage):
@@ -118,8 +121,9 @@ class TriggerParameters(PipelineStage):
     allow_external = param.Boolean(False, label='Allow For External Trigger?')
     total_trains = param.Number(default=50, precedence=1, label='Total Number of Trains: ')
     time_between_trains = param.Number(default=2000, precedence=1, label = 'Time Between Each Train (ms):')
-    def __init__(self, **params):
+    def __init__(self, main_gui, **params):
         super().__init__(**params)
+        self.main_gui = main_gui
         # Set up watchers on parameters that affect the view
         self.param.watch(self.update_output, ['allow_external', 'total_trains', 'time_between_trains'])
     @param.depends('allow_external', watch=True)
@@ -139,21 +143,23 @@ class TriggerParameters(PipelineStage):
 
         # Combine widgets into a layout
         return pn.Column(external_widget, total_trains_widget, time_between_trains_widget)
-    def update_output(self, event):
+    def update_output(self, event=None):
         # This method now contains logic to refresh the GUI components affected by parameter changes
         # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
         # or implement more specific logic if only parts of the view need updating
         self._update_fields()
         self.view()
+        self.main_gui.refresh_view()
 # Class for setting up external signal parameters
 class ExternalSignal(PipelineStage):
     # Define parameters for external signal settings
     duration = param.Number(default=0.0, label='Duration of External Signal (us):')
     delay = param.Number(default=0.0, label='Delay Between External Signal and Stimulation (us):')
-    def __init__(self, **params):
+    def __init__(self, main_gui, **params):
         super().__init__(**params)
         # Set up watchers on parameters that affect the view
         self.param.watch(self.update_output, ['duration', 'delay'])
+        self.main_gui = main_gui
 
     # Generate GUI layout for external signal parameters
     def view(self):
@@ -162,11 +168,12 @@ class ExternalSignal(PipelineStage):
 
         # Combine widgets into a layout
         return pn.Column(duration_widget, delay_widget)
-    def update_output(self, event):
+    def update_output(self, event=None):
         # This method now contains logic to refresh the GUI components affected by parameter changes
         # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
         # or implement more specific logic if only parts of the view need updating
         self.view()
+        self.main_gui.refresh_view()
 # adapt to various experimental requirements. By using Panel widgets, the GUI is both functional and user-friendly.
 
 # Class for displaying the output and running the simulation
@@ -190,7 +197,7 @@ class OutputDisplay(param.Parameterized):
     output_location = param.String(default='/Users/eashan/DenmanLab/stg5_try/output_1.dat', doc="Output Location")
     run_action = param.Action(label='Run Simulation')  # Button to trigger the simulation
 
-    def __init__(self, stimulation_params, trigger_params, external_signal_params, **params):
+    def __init__(self, main_gui, stimulation_params, trigger_params, external_signal_params, **params):
         super(OutputDisplay, self).__init__(**params)
         self.stimulation_params = stimulation_params
         self.trigger_params = trigger_params
@@ -201,7 +208,7 @@ class OutputDisplay(param.Parameterized):
             'include_external_triggering', 'include_total_trains', 'include_time_between_trains',
             'include_external_signal_duration', 'include_delay_from_beginning'
         ])
-
+        self.main_gui = main_gui
         # Watch for changes in parameters to update the output display accordingly
 
     def update_table_data(self, event=None):
@@ -293,6 +300,7 @@ class OutputDisplay(param.Parameterized):
             self.loading_bar_widget,  # Include the loading bar in the layout
             self.loading_percent       # Include the loading percent indicator in the layout
         )
+        self.main_gui.refresh_view()
         return layout
     def channel_data(self, volt_or_curr, waveform, amplitude, pulse_duration, frequency, total_trains, time_between_trains, external_signal_dur, delay_from_stim):
         # Initialize lists to hold amplitude and duration values, and repeat counts
@@ -443,27 +451,38 @@ class OutputDisplay(param.Parameterized):
 # Finally, the script combines all the components into a Panel Tabs layout for easy navigation between different sections of the GUI.
 # Each section (Stimulation Parameters, Trigger Parameters, External Signal, and Output) is added as a separate tab.
 
-# Instantiate stages
-stimulation_params = StimulationParameters()
-trigger_params = TriggerParameters()
-external_signal_params = ExternalSignal()
-output_display = OutputDisplay(stimulation_params, trigger_params, external_signal_params)
 
-# Setting up the tabs
-tabs = pn.Tabs(
-    ('Stimulation Parameters', pn.Column(stimulation_params.view())),
-    ('Trigger Parameters', pn.Column(trigger_params.view())),
-    ('External Signal', pn.Column(external_signal_params.view())),
-    ('Output', pn.Column(output_display.view()))
-)
+class MainGUI(param.Parameterized):
+    def __init__(self, **params):
+        super(MainGUI, self).__init__(**params)
+        
+        # Initialize parameter classes
+        self.stimulation_params = StimulationParameters()
+        self.trigger_params = TriggerParameters()
+        self.external_signal_params = ExternalSignal()
 
-# Monitor changes in parameters across all stages to update the output display dynamically
-for stage in [stimulation_params, trigger_params, external_signal_params]:
-    stage.param.watch(lambda event: output_display.update_table_data(), list(stage.param))
+        # OutputDisplay now needs to be aware of the other classes to display their current states
+        self.output_display = OutputDisplay(stimulation_params=self.stimulation_params, 
+                                             trigger_params=self.trigger_params, 
+                                             external_signal_params=self.external_signal_params)
 
-# Make the tabs layout servable, allowing it to be viewed as a web application
-tabs.servable()
+        # Set up the Panel tabs
+        self.tabs = self.setup_tabs()
 
-# Additionally, to run the Panel app locally, use the .show() method with an optional port number
-tabs.show(port=8080)
+    def setup_tabs(self):
+        # Assemble tabs with views from each class
+        tabs = pn.Tabs(
+            ('Stimulation Parameters', self.stimulation_params.view()),
+            ('Trigger Parameters', self.trigger_params.view()),
+            ('External Signal', self.external_signal_params.view()),
+            ('Output', self.output_display.view())  # Assumes that `view` is a method that returns a Panel object
+        )
+        return tabs
 
+    def servable(self):
+        # Make the tabs servable as the main app entry point
+        return self.tabs.servable()
+
+# Instantiate and serve the main GUI
+main_gui = MainGUI()
+main_gui.servable()
