@@ -715,6 +715,7 @@ class DynamicStimGui:
         
         file_path = os.path.join(os.getcwd(), "output.dat")  # Save in current working directory
         channels_data = self.controller.dat_data()  # Assume this method retrieves the channels data
+        self.update_table_data
         self.controller.create_dat_file(file_path, channels_data)
         print(f"Saved .dat file at {file_path}")
 
@@ -724,7 +725,7 @@ class DynamicStimGui:
         if not hasattr(self, 'controller'):
             print("Controller not set up properly.")
             return
-
+        self.update_table_data
         self.controller.run_simulation()  # Assuming 'run_simulation' is a method in STGDeviceController
         print("Stimulation run initiated.")
 
