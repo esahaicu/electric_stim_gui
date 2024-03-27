@@ -69,28 +69,29 @@ class STGDeviceController:
                 # Assign waveform-specific values and add pulse data
                 if waveform == "Monophasic":
                     total_time = events * (pulse_duration + duration_between_events)
-                    add_pulse_data(1, 0, amplitude, 0, pulse_duration)
+                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
                     add_pulse_data(1, 0, 0, 0, duration_between_events)
                     if event == events - 1:  # Add rest time at the end of each train, except after the last event
                         add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
                 elif waveform == "Biphasic":
                     total_time = events * (2 * pulse_duration + duration_between_events)
                     # Biphasic waveform: first phase amplitude, then negative phase
-                    add_pulse_data(1, 0, amplitude, 0, pulse_duration)
-                    add_pulse_data(1, 0, -amplitude, 0, pulse_duration)
+                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
+                    add_pulse_data(1, 0, 0, -amplitude, pulse_duration)
                     add_pulse_data(1, 0, 0, 0, duration_between_events)
                     if event == events - 1:
                         add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
                 elif waveform == "Sinusoidal":
                     total_time = events * (1/frequency + duration_between_events)
                     # For simplicity, assuming each event in a sinusoidal train lasts for 'pulse_duration'
-                    add_pulse_data(1, 0, amplitude, 0, pulse_duration)
+                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
                     add_pulse_data(1, 0, 0, 0, duration_between_events)
                     if event == events - 1:
                         add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
 
         # Process external signal duration and delay from stimulus for relevant channels
-            add_pulse_data(9, 0, 0, 1.000, external_signal_dur)  # Example for external signal duration
+            add_pulse_data(9, 0, 0, 1.000, external_signal_dur)
+            add_pulse_data(9, 0, 0, 0.000, time_between_trains-external_signal_dur)  # Example for external signal duration
         return channels_data
 
     def create_dat_file(self, file_path, dat_data):
@@ -99,7 +100,7 @@ class STGDeviceController:
             file.write("Multi Channel Systems MC_Stimulus II\n")
             file.write("ASCII import Version 1.10\n\n")
             file.write(f"channels:\t{int(len(dat_data)/2)}\n")
-            file.write("output mode:\tcurrent\n")
+            file.write(f"output mode:\t{'current' if self.gui.modulation_type_group.value == 'Current' else 'voltage'}\n")
             file.write("format:\t5\n\n")
             
             # Iterate over each channel and its data
@@ -111,52 +112,60 @@ class STGDeviceController:
                 file.write("\n")  # Add an empty line after each channel's data
 
     def run_data(self):
-        # Initialize lists to hold amplitude and duration values, and repeat counts
         waveform, amplitude, pulse_duration, frequency, events, duration_between_events, total_trains, time_between_trains, external_signal_dur = self.channel_data()
         
-        amplitudes = []
-        durations = []
-        repeats = []
-        syncout_val = []
-        syncout_dur = []
+        # Initialize lists to hold amplitude, duration, and sync signals
+        amplitudes, durations, syncout_val, syncout_dur = [], [], [], []
         
-        # Calculate the base amplitude and duration for each waveform type
-        if waveform == "Monophasic":
-            base_amplitude = amplitude
-            base_duration = pulse_duration
-        elif waveform == "Biphasic":
-            base_amplitude = [amplitude, -amplitude]  # Biphasic involves two phases
-            base_duration = [pulse_duration, pulse_duration]  # Assuming equal duration for both phases
-        elif waveform == "Sinusoidal":
-            base_amplitude = amplitude
-            base_duration = 1000 / frequency
+        # Calculate base duration for sinusoidal waveforms if needed
+        base_duration = 1000 / frequency if waveform == "Sinusoidal" else pulse_duration
+        
         for train in range(total_trains):
             for event in range(events):
-                if waveform == "Monophasic" or waveform == "Sinusoidal":
-                    amplitudes.append(base_amplitude)
+                if waveform == "Biphasic":
+                    # Positive phase
+                    amplitudes.append(amplitude)
+                    durations.append(pulse_duration)
+                    # Assuming you want the sync signal to be high for both phases of a biphasic pulse
+                    syncout_val.extend([1, 1])  # High for positive and negative phase
+                    syncout_dur.extend([pulse_duration, pulse_duration])
+                    
+                    # Negative phase (amplitude and duration already appended)
+                elif waveform == "Monophasic" or waveform == "Sinusoidal":
+                    amplitudes.append(amplitude)
                     durations.append(base_duration)
-                    if event < events - 1:  # Add duration between events if not the last event
-                        amplitudes.append(0)
-                        durations.append(duration_between_events)
-                elif waveform == "Biphasic":
-                    # Append amplitudes and durations for both phases of Biphasic waveform
-                    amplitudes.extend(base_amplitude)
-                    durations.extend(base_duration)
-                    if event < events - 1:  # Add duration between events if not the last event
-                        amplitudes.append(0)
-                        durations.append(duration_between_events)
-            
-            # Add rest period at the end of each train
+                    syncout_val.append(1)  # High for the duration of the pulse
+                    syncout_dur.append(base_duration)
+                
+                # Inter-event pause
+                if event < events - 1:  # If not the last event
+                    pause_duration = duration_between_events
+                    amplitudes.append(0)
+                    durations.append(pause_duration)
+                    syncout_val.append(0)  # Low during the pause
+                    syncout_dur.append(pause_duration)
+
+            # After all events in this train
+            # If it's not the last train, add rest period until the next train starts
             if train < total_trains - 1:
-                amplitudes.append(0)
-                durations.append(time_between_trains)
+                next_train_start = (train + 1) * time_between_trains
+                current_duration = sum(durations)
+                rest_duration = next_train_start - current_duration
+                if rest_duration > 0:
+                    amplitudes.append(0)
+                    durations.append(rest_duration)
+                    syncout_val.append(0)  # Low during the rest period
+                    syncout_dur.append(rest_duration)
 
-        # Handling syncout values - assuming external signal trigger applies to each train
-        syncout_val.extend([1] * total_trains)
-        syncout_dur.extend([external_signal_dur] * total_trains)
-
-        # Calculating repeats - Assuming each waveform pattern (including biphasic as one pattern) repeats for 'events' times
-        repeats = [events] * total_trains if waveform != "Biphasic" else [events * 2] * total_trains  # For Biphasic, each phase is considered
+        repeats = [1] * len(amplitudes)  # Assuming each pattern is applied once per event
+        
+        # Final adjustment: Ensure the total duration of sync signals matches the total duration of the stimulation
+        total_stimulation_duration = sum(durations)
+        total_sync_duration = sum(syncout_dur)
+        if total_sync_duration < total_stimulation_duration:
+            # Add a final low sync signal if needed
+            syncout_val.append(0)
+            syncout_dur.append(total_stimulation_duration - total_sync_duration)
 
         return waveform, amplitudes, durations, repeats, syncout_val, syncout_dur
 
@@ -239,7 +248,8 @@ class STGDeviceController:
         # Gather input values from the GUI
         datetime_val = pendulum.now(tz='America/Denver')
         # Map GUI inputs to channel_data function parameters
-        volt_or_curr, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr = self.channel_data(self.volt_or_curr, self.waveform, self.amplitude, self.pulse_duration, self.frequency, self.total_trains, self.time_between_trains, self.external_signal_dur, self.delay_from_stim)
+        volt_or_curr = self.gui.modulation_type_group.value
+        _, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr = self.run_data()
         print(np.shape(amplitude_arr), np.shape(duration_arr), np.shape(repeat_arr), np.shape(sync_out_val_arr), np.shape(sync_out_dur_arr))
         self.stg5_connect_and_program(volt_or_curr, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr)
         #print(waveform, amplitude, pulse_duration, frequency, total_trains, time_between_trains, external_signal_dur, delay_from_stim)

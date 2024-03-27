@@ -31,25 +31,29 @@ class PipelineStage(param.Parameterized):
 # Define a class for configuring stimulation parameters
 class StimulationParameters(PipelineStage):
     # Define selectable options and default values for parameters
-    waveform = param.Selector(default='Biphasic', objects=['Monophasic', 'Biphasic', 'Sinusoidal'], label='Choose Waveform: ')
-    volt_or_curr = param.Selector(default='Current', objects=['Current', 'Voltage'], precedence = 0, label='Current or Voltage: ')
-    amplitude = param.Number(default=0, label = 'Set Amplitude (uA or uV): ')
-    pulse_duration = param.Number(default=100, step=1, label="Set Pulse Duration (us)")
-    frequency_or_period_choice = param.Selector(default="Frequency", objects=["Frequency", "Period"], precedence=-1, label = 'Choose Frequency (Hz) or Period (ms): ')  # Visibility controlled by waveform and amplitude
-    frequency_period_value = param.Number(default=1.0, step=0.00001, precedence=-1, label = 'Frequency/Period Value: ')  # Visibility controlled by waveform and amplitude, bounds adjusted
-    phase = param.String(default='Neither', label = 'Phase Chosen: ')  # Updated based on amplitude
-    frequency = param.Number(default=0, bounds=(0, None), label='Current Frequency (Hz): ')  # Dynamically calculated, visibility controlled
-    period = param.Number(default=0, bounds=(0, None), label = 'Current Period (ms): ')  # Dynamically calculated, visibility controlled
+    waveform = param.ClassSelector(class_=pn.widgets.RadioButtonGroup, default='Biphasic', objects=['Monophasic', 'Biphasic', 'Sinusoidal'])
+    volt_or_curr = param.ClassSelector(class_=pn.widgets.RadioButtonGroup, default='Current', objects=['Current', 'Voltage'])
+    amplitude = param.ClassSelector(class_=pn.widgets.IntSlider, default=0, bounds=(-1000, 1000))
+    pulse_duration = param.ClassSelector(class_=pn.widgets.IntSlider, default=100, bounds=(0, 1000))
+    frequency_or_period_choice = param.ClassSelector(class_=pn.widgets.RadioButtonGroup, default="Frequency", objects=["Frequency", "Period"])
+    frequency_period_value = param.ClassSelector(class_=pn.widgets.IntSlider, default=1.0, bounds=(0.1, 1000), step=0.1)
+    
+    phase = param.String(default='Neither')
+    frequency = param.Number(default=0, bounds=(0, None))
+    period = param.Number(default=0, bounds=(0, None))
    
     def __init__(self, main_gui, **params):
         super().__init__(**params)
         self.main_gui = main_gui
-        self._update_phase_text()  # Update phase text based on amplitude
-        self._update_visibility()  # Update visibility of parameters based on selections
-        self.param.watch(self.update_output, ['waveform', 'volt_or_curr', 'amplitude', 'pulse_duration', 'frequency_or_period_choice', 'frequency_period_value'])
+        self._update_visibility()
+        self._update_phase()
+        self._update_frequency_period()
+
+        self.param.watch(self._update_visibility, ['waveform', 'amplitude'])
+        self.param.watch(self._update_phase, 'amplitude')
+        self.param.watch(self._update_frequency_period, ['frequency_or_period_choice', 'frequency_period_value'])
     @param.depends('amplitude', watch=True)
-    def _update_phase_text(self):
-        # Update phase text based on the sign of the amplitude
+    def _update_phase(self):
         if self.amplitude > 0:
             self.phase = "Anode"
         elif self.amplitude < 0:
@@ -59,60 +63,17 @@ class StimulationParameters(PipelineStage):
 
     @param.depends('frequency_or_period_choice', 'frequency_period_value', watch=True)
     def _update_frequency_period(self):
-        # Calculate frequency and period based on user selection
         if self.frequency_or_period_choice == "Frequency":
             self.frequency = self.frequency_period_value
-            self.period = (1 / self.frequency_period_value) * 1000 if self.frequency_period_value else float('inf')
+            self.period = 1000 / self.frequency_period_value if self.frequency_period_value != 0 else float('inf')
         else:
             self.period = self.frequency_period_value
-            self.frequency = (1 / self.period) * 1000 if self.period else 0
+            self.frequency = 1000 / self.period if self.period != 0 else 0
 
-    @param.depends('waveform', 'amplitude', 'volt_or_curr', watch=True)
     def _update_visibility(self):
-        # Update visibility of parameters based on waveform and amplitude selections
-        is_sinusoidal = self.waveform == 'Sinusoidal' and self.amplitude != 0
-        self.param.frequency_or_period_choice.precedence = 1 if is_sinusoidal else -1
-        self.param.frequency_period_value.precedence = 1 if is_sinusoidal else -1
-        self.param.pulse_duration.precedence = -1 if is_sinusoidal else 1
-        # Update visibility of parameters based on waveform selection
-        self.param['phase'].precedence = 1 if self.waveform == 'Biphasic' else -1  # Hide phase if not Biphasic
-        self.param['frequency'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Hide phase if not Sinusoidal
-        self.param['period'].precedence = 1 if self.waveform == 'Sinusoidal' else -1  # Hide phase if not Sinusoidal
-
-    # Define method for generating the GUI layout for stimulation parameters
-    @param.depends('waveform', 'volt_or_curr', 'amplitude', 'frequency_or_period_choice', 'frequency_period_value', watch=True)
-    def view(self):
-        waveform_widget = pn.widgets.RadioButtonGroup(name='Waveform', options=self.param['waveform'].objects, value=self.waveform)
-        vc_widget = pn.widgets.RadioButtonGroup(name='Current or Voltage', options=self.param['volt_or_curr'].objects, value=self.volt_or_curr)
-        amplitude_widget = pn.widgets.FloatInput(name='Amplitude (uA)', value=self.amplitude, step=1)
-        phase_display = pn.pane.Markdown(f"**Phase:** {self.phase}", visible=self.waveform == 'Biphasic' and self.amplitude != 0)
-        # Widgets for selecting frequency or period based on the waveform type
-        frequency_or_period_widget = pn.widgets.RadioButtonGroup(name='Frequency or Period', options=['Frequency', 'Period'], value=self.frequency_or_period_choice, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-        frequency_period_value_widget = pn.widgets.FloatInput(name='Frequency/Period Value', value=self.frequency_period_value, visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)        
-        # Displays for showing the calculated frequency and period
-        frequency_display = pn.pane.Markdown(f"**Frequency:** {self.frequency} Hz", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-        period_display = pn.pane.Markdown(f"**Period:** {self.period} ms", visible=self.waveform == 'Sinusoidal' and self.amplitude != 0)
-        # Combine all the widgets into a column layout
-        return pn.Column(
-            waveform_widget,
-            vc_widget,
-            amplitude_widget,
-            phase_display,
-            frequency_or_period_widget,
-            frequency_period_value_widget,
-            pn.layout.Spacer(height=10),  # Add space before frequency/period displays
-            frequency_display,
-            period_display
-        )
-    def update_output(self, event=None):
-        # This method now contains logic to refresh the GUI components affected by parameter changes
-        # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
-        # or implement more specific logic if only parts of the view need updating
-        self._update_phase_text()
-        self._update_frequency_period()
-        self._update_visibility()
-        self.view()
-        self.main_gui.refresh_view()
+        is_sinusoidal = self.waveform == 'Sinusoidal'
+        self.param['frequency_or_period_choice'].precedence = 0 if is_sinusoidal else -1
+        self.param['frequency_period_value'].precedence = 0 if is_sinusoidal else -1
 
 
 # Class for configuring trigger parameters
@@ -148,8 +109,7 @@ class TriggerParameters(PipelineStage):
         # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
         # or implement more specific logic if only parts of the view need updating
         self._update_fields()
-        self.view()
-        self.main_gui.refresh_view()
+        return self.view()
 # Class for setting up external signal parameters
 class ExternalSignal(PipelineStage):
     # Define parameters for external signal settings
@@ -172,9 +132,8 @@ class ExternalSignal(PipelineStage):
         # This method now contains logic to refresh the GUI components affected by parameter changes
         # For simplicity, you might just call self.view() if the entire view needs to be refreshed,
         # or implement more specific logic if only parts of the view need updating
-        self.view()
-        self.main_gui.refresh_view()
-# adapt to various experimental requirements. By using Panel widgets, the GUI is both functional and user-friendly.
+        return self.view()
+        # adapt to various experimental requirements. By using Panel widgets, the GUI is both functional and user-friendly.
 
 # Class for displaying the output and running the simulation
 class OutputDisplay(param.Parameterized):
@@ -300,7 +259,6 @@ class OutputDisplay(param.Parameterized):
             self.loading_bar_widget,  # Include the loading bar in the layout
             self.loading_percent       # Include the loading percent indicator in the layout
         )
-        self.main_gui.refresh_view()
         return layout
     def channel_data(self, volt_or_curr, waveform, amplitude, pulse_duration, frequency, total_trains, time_between_trains, external_signal_dur, delay_from_stim):
         # Initialize lists to hold amplitude and duration values, and repeat counts
@@ -468,27 +426,19 @@ class MainGUI(param.Parameterized):
 
     def setup_tabs(self):
         return pn.Tabs(
-            ('Stimulation Parameters', self.stimulation_params.view()),
-            ('Trigger Parameters', self.trigger_params.view()),
-            ('External Signal', self.external_signal_params.view()),
-            ('Output', self.output_display.view())
+            ('Stimulation Parameters', self.stimulation_params),
+            ('Trigger Parameters', self.trigger_params.view),
+            ('External Signal', self.external_signal_params.view),
+            ('Output', self.output_display.view)
         )
+    def update_tabs(self):
+        for stage in [self.stimulation_params, self.trigger_params, self.external_signal_params]:
+            stage.param.watch(lambda event: self.output_display.update_table_data(), list(stage.param))
+            #stage.param.watch(lambda event: self.stimulation_params.update_output(), list(stage.param))
 
-    def refresh_view(self):
-        self.stimulation_params.update_output()
-        self.trigger_params.update_output()
-        self.external_signal_params.update_output()
-        self.output_display.update_output()
+            stage.param.watch(lambda event: self.trigger_params.update_output(), list(stage.param))
 
-        # Now, update the tabs with the refreshed views
-        self.tabs.clear()  # First, clear the existing tabs
-        # Then, recreate the tabs with updated views
-        self.tabs.extend([
-            ('Stimulation Parameters', self.stimulation_params.view()),
-            ('Trigger Parameters', self.trigger_params.view()),
-            ('External Signal', self.external_signal_params.view()),
-            ('Output', self.output_display.view())
-        ])
+            stage.param.watch(lambda event: self.external_signal_params.update_output(), list(stage.param))
 
 
     def servable(self):

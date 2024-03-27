@@ -430,7 +430,7 @@ class OutputDisplay(param.Parameterized):
             syncout_dur = Array[UInt64](sync_out_dur_arr)
             syncout_start = Array[Int32]([1,0])
             syncout_start_dur = Array[UInt64]([500,100])
-
+            print(channelmap, syncoutmap,start_channelmap,start_syncoutmap)
             device.SetupTrigger(0, channelmap, syncoutmap, repeat)
             device.SetupTrigger(1, start_channelmap, start_syncoutmap, start_repeat)
             if volt_or_curr == 'Current':
