@@ -13,20 +13,23 @@ import csv
 import pendulum
 import time
 import os
-import clr
+import json
 
-from System import Action
-from System import *
 
-#change this path to the McsUsbNet for your computer
-clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+# import clr
 
-from Mcs.Usb import CMcsUsbListNet
-from Mcs.Usb import DeviceEnumNet
+# from System import Action
+# from System import *
 
-from Mcs.Usb import CStg200xDownloadNet
-from Mcs.Usb import McsBusTypeEnumNet
-from Mcs.Usb import STG_DestinationEnumNet
+# #change this path to the McsUsbNet for your computer
+# clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+
+# from Mcs.Usb import CMcsUsbListNet
+# from Mcs.Usb import DeviceEnumNet
+
+# from Mcs.Usb import CStg200xDownloadNet
+# from Mcs.Usb import McsBusTypeEnumNet
+# from Mcs.Usb import STG_DestinationEnumNet
 
 class STGDeviceController:
     def __init__(self, gui_instance):
@@ -111,154 +114,6 @@ class STGDeviceController:
                     file.write(f"{row['pulse']}\t{row['value1']}\t{row['value2']}\t{row['time']}\n")
                 file.write("\n")  # Add an empty line after each channel's data
 
-    def run_data(self):
-        waveform, amplitude, pulse_duration, frequency, events, duration_between_events, total_trains, time_between_trains, external_signal_dur = self.channel_data()
-        
-        # Initialize lists to hold amplitude, duration, and sync signals
-        amplitudes, durations, syncout_val, syncout_dur = [], [], [], []
-        
-        # Calculate base duration for sinusoidal waveforms if needed
-        base_duration = 1000 / frequency if waveform == "Sinusoidal" else pulse_duration
-        
-        for train in range(total_trains):
-            for event in range(events):
-                if waveform == "Biphasic":
-                    # Positive phase
-                    amplitudes.append(amplitude)
-                    durations.append(pulse_duration)
-                    # Assuming you want the sync signal to be high for both phases of a biphasic pulse
-                    syncout_val.extend([1, 1])  # High for positive and negative phase
-                    syncout_dur.extend([pulse_duration, pulse_duration])
-                    
-                    # Negative phase (amplitude and duration already appended)
-                elif waveform == "Monophasic" or waveform == "Sinusoidal":
-                    amplitudes.append(amplitude)
-                    durations.append(base_duration)
-                    syncout_val.append(1)  # High for the duration of the pulse
-                    syncout_dur.append(base_duration)
-                
-                # Inter-event pause
-                if event < events - 1:  # If not the last event
-                    pause_duration = duration_between_events
-                    amplitudes.append(0)
-                    durations.append(pause_duration)
-                    syncout_val.append(0)  # Low during the pause
-                    syncout_dur.append(pause_duration)
-
-            # After all events in this train
-            # If it's not the last train, add rest period until the next train starts
-            if train < total_trains - 1:
-                next_train_start = (train + 1) * time_between_trains
-                current_duration = sum(durations)
-                rest_duration = next_train_start - current_duration
-                if rest_duration > 0:
-                    amplitudes.append(0)
-                    durations.append(rest_duration)
-                    syncout_val.append(0)  # Low during the rest period
-                    syncout_dur.append(rest_duration)
-
-        repeats = [1] * len(amplitudes)  # Assuming each pattern is applied once per event
-        
-        # Final adjustment: Ensure the total duration of sync signals matches the total duration of the stimulation
-        total_stimulation_duration = sum(durations)
-        total_sync_duration = sum(syncout_dur)
-        if total_sync_duration < total_stimulation_duration:
-            # Add a final low sync signal if needed
-            syncout_val.append(0)
-            syncout_dur.append(total_stimulation_duration - total_sync_duration)
-
-        return waveform, amplitudes, durations, repeats, syncout_val, syncout_dur
-
-
-    
-    def stg5_connect_and_program(self, volt_or_curr, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr):
-        def PollHandler(status, stgStatusNet, index_list):
-            print('%x %s' % (status, str(stgStatusNet.TiggerStatus[0])))
-
-        deviceList = CMcsUsbListNet(DeviceEnumNet.MCS_DEVICE_USB)
-
-        print("found %d devices" % (deviceList.Count))
-
-        for i in range(deviceList.Count):
-            listEntry = deviceList.GetUsbListEntry(i)
-            print("Device: %s   Serial: %s" % (listEntry.DeviceName,listEntry.SerialNumber))
-
-
-            device = CStg200xDownloadNet();
-
-            device.Stg200xPollStatusEvent += PollHandler;
-
-            device.Connect(deviceList.GetUsbListEntry(0))
-
-            #voltageRange = device.GetVoltageRangeInMicroVolt(0);
-            #voltageResulution = device.GetVoltageResolutionInMicroVolt(0);
-            #currentRange = device.GetCurrentRangeInNanoAmp(0);
-            #currentResolution = device.GetCurrentResolutionInNanoAmp(0);
-
-            #print('Voltage Mode:  Range: %d mV  Resolution: %1.2f mV' % (voltageRange/1000, voltageResulution/1000.0))
-            #print('Current Mode:  Range: %d uA  Resolution: %1.2f uA' % (currentRange/1000, currentResolution/1000.0))
-
-            channelmap = Array[UInt32]([1,0,0,0])
-            syncoutmap = Array[UInt32]([1,0,0,0])
-            start_channelmap = Array[UInt32]([2,0,0,0])
-            start_syncoutmap = Array[UInt32]([2,0,0,0])
-            start_repeat = Array[UInt32]([1,0,0,0])
-            repeat = Array[Int32](repeat_arr)
-            amplitude = Array[Int32](amplitude_arr)
-            duration = Array[UInt64](duration_arr)
-            syncout = Array[Int32](sync_out_val_arr)
-            syncout_dur = Array[UInt64](sync_out_dur_arr)
-            syncout_start = Array[Int32]([1,0])
-            syncout_start_dur = Array[UInt64]([500,100])
-
-            device.SetupTrigger(0, channelmap, syncoutmap, repeat)
-            device.SetupTrigger(1, start_channelmap, start_syncoutmap, start_repeat)
-            if volt_or_curr == 'Current':
-                device.SetCurrentMode()
-                print('Current Mode')
-                device.PrepareAndSendData(0, amplitude*1000, duration, STG_DestinationEnumNet.channeldata_current)
-            else:
-                device.SetVoltageMode()
-                print('Voltage Mode')
-                device.PrepareAndSendData(0, amplitude, duration, STG_DestinationEnumNet.channeldata_voltage)
-
-            device.PrepareAndSendData(0, syncout, syncout_dur, STG_DestinationEnumNet.syncoutdata)
-            device.PrepareAndSendData(1, syncout_start, syncout_start_dur, STG_DestinationEnumNet.syncoutdata)
-            print('Starting!')
-            device.SendStart(2)
-            time.sleep(0.001)
-            print('Sending Pulses!')
-            device.SendStart(1)
-            tic = time.perf_counter()
-            toc = 0
-            #time.sleep((np.sum(duration_arr)/1000000)*np.max(repeat_arr))
-            total_duration = int((np.sum(duration_arr)/1000000)*np.max(repeat_arr))
-            
-            while toc < total_duration:
-                toc = time.perf_counter()-tic
-                #print(toc)
-                self.loading_bar_widget.value=int((toc/total_duration)*100)
-                self.loading_percent.value = int((toc/total_duration)*100)
-                self.update_table_data()
-                #print('Updated')
-            print('All Done!')
-            device.Disconnect()
-            print('Disconnected')    
-    def run_simulation(self, event=None):
-        # Gather input values from the GUI
-        datetime_val = pendulum.now(tz='America/Denver')
-        # Map GUI inputs to channel_data function parameters
-        volt_or_curr = self.gui.modulation_type_group.value
-        _, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr = self.run_data()
-        print(np.shape(amplitude_arr), np.shape(duration_arr), np.shape(repeat_arr), np.shape(sync_out_val_arr), np.shape(sync_out_dur_arr))
-        self.stg5_connect_and_program(volt_or_curr, amplitude_arr, duration_arr, repeat_arr, sync_out_val_arr, sync_out_dur_arr)
-        #print(waveform, amplitude, pulse_duration, frequency, total_trains, time_between_trains, external_signal_dur, delay_from_stim)
-        # Specify the output file path from the GUI input
-        #output_file_path = "/Users/eashan/DenmanLab/stg5_try/ascii_output/output_{}-{}-{}T{}_{}.dat".format(datetime_val.year, datetime_val.month, datetime_val.day, datetime_val.hour, datetime_val.minute)
-        csv_file_path = r'C:\Users\denma\Desktop\stg5_trial_csvs\csv_{}.csv'.format(datetime_val.to_iso8601_string().replace(':','-').replace('T','_').replace('.','___'))
-        
-        # Call the function to create and save the .dat file
-        #self.create_dat_file(output_file_path, channels_data)
 class DynamicStimGui:
     def __init__(self):
         self.channel_buttons = {}  # Stores RadioButtonGroup for each channel
@@ -266,9 +121,14 @@ class DynamicStimGui:
         self._setup_layout()
         self._connect_callbacks()
         self._setup_finalize_tab()
+        #self.upload_old_settings_button = pn.widgets.FileInput(accept='.json', name='Upload Old Settings')
+
 
     
     def _setup_widgets(self):
+
+        ### THIS IS THE SECTION THAT DEFINES THE EVENT SELECTION
+
         self.waveform_group = pn.widgets.RadioButtonGroup(name='Waveform Type', options=['Monophasic', 'Biphasic', 'Sinusoidal'], button_type='primary')
         self.modulation_type_group = pn.widgets.RadioButtonGroup(name='Modulation Type', options=['Voltage', 'Current'], button_type='success')
         self.period_frequency_group = pn.widgets.RadioButtonGroup(
@@ -293,8 +153,23 @@ class DynamicStimGui:
         
         self.phase_text = pn.pane.Markdown(visible=False)
         self.sinusoidal_calculation_text = pn.pane.Markdown(visible=False)
-    
 
+        # Define Unit Selectors
+        self.amplitude_unit_selector = pn.widgets.RadioButtonGroup(
+            name='Amplitude Unit', options=['uA', 'mA', 'A'], button_type='default')
+        self.pulse_duration_unit_selector = pn.widgets.RadioButtonGroup(
+            name='Duration Unit', options=['us', 'ms', 's'], button_type='default', visible=False)
+        self.period_frequency_unit_selector = pn.widgets.RadioButtonGroup(
+            name='Period/Frequency Unit', options=['us', 'ms', 's'], button_type='default', visible=False)
+        self.duration_between_events_unit_selector = pn.widgets.RadioButtonGroup(
+            name='Duration Between Events Unit', options=['us', 'ms', 's'], button_type='default', visible=False)
+
+        # Defining the range sliders
+        self.amplitude_range_slider = pn.widgets.EditableRangeSlider(name='Random Amplitude Range', start=-100, end=100, value=(-100, 100), step=1)
+        self.pulse_duration_range_slider = pn.widgets.EditableRangeSlider(name='Random Pulse Duration Range', start=0, end=1000, value=(0, 1000), step=1)
+        self.period_frequency_range_slider = pn.widgets.EditableRangeSlider(name='Random Period/Frequency Range', start=1, end=1000, value=(1, 1000), step=1)
+        self.number_of_events_range_slider = pn.widgets.EditableRangeSlider(name='Random Number of Events Range', start=1, end=1000, value=(1, 1000), step=1)
+        self.duration_between_events_range_slider = pn.widgets.EditableRangeSlider(name='Duration Between Events Range', start=0, end=1000, value=(0, 1000), step=1)
 
 
         ### TRAIN WIDGETS
@@ -303,14 +178,20 @@ class DynamicStimGui:
         self.randomize_number_of_trains = pn.widgets.Button(name='Randomize', button_type='warning')
         self.randomize_train_duration = pn.widgets.Button(name='Randomize', button_type='warning')
         self.accept_external_trigger = pn.widgets.Toggle(name='Accept External Trigger for Train?', value=False)
+        # Additional widgets for Train Settings
+        self.number_of_trains_range_slider = pn.widgets.EditableRangeSlider(name='Random Number of Trains Range', start=1, end=100, value=(1, 100), step=1)
+        self.train_duration_unit_selector = pn.widgets.RadioButtonGroup(name='Train Duration Unit', options=['us', 'ms', 's'], button_type='default')
+        self.train_duration_range_slider = pn.widgets.EditableRangeSlider(name='Random Train Duration Range', start=0, end=100000, value=(0, 1000), step=1)
 
 
 
 
         # External Trigger Widgets
-        self.external_trigger_duration = pn.widgets.EditableIntSlider(name='External Trigger Duration', start=0, end=1000000, step=1, value=100)
+        self.external_trigger_duration = pn.widgets.EditableFloatSlider(name='External Trigger Duration', start=0, end=1000000, step=1, value=100)
         self.randomize_external_trigger = pn.widgets.Button(name='Randomize', button_type='warning')
         self.set_to_pulse_duration = pn.widgets.Button(name='Set to Pulse Duration', button_type='primary')
+        self.external_trigger_duration_unit_selector = pn.widgets.RadioButtonGroup(name='External Trigger Duration Unit', options=['us', 'ms', 's'], button_type='default')
+        self.external_trigger_duration_range_slider = pn.widgets.RangeSlider(name='Random External Trigger Duration Range', start=0, end=100000, value=(0, 1000), step=1)
 
         ### CHANNEL CHOOSING WIDGETS
         self.channel_select_widgets = []  # This should store the radio button widgets for access in randomization
@@ -332,27 +213,55 @@ class DynamicStimGui:
 
     def _setup_layout(self):
         event_settings_layout = pn.Column(
+            # Waveform selection and modulation type
             self.waveform_group,
             self.modulation_type_group,
-            pn.Row(self.amplitude_slider, self.randomize_amplitude),
-            pn.Row(self.pulse_duration_slider, self.randomize_pulse_duration),
+            
+            # Amplitude setting with unit selector and randomize options
+            pn.Row(
+                self.amplitude_slider, 
+                self.amplitude_unit_selector, 
+                self.randomize_amplitude,
+                self.amplitude_range_slider),  # Amplitude range slider
+            
+            # Pulse duration with unit selector and randomize options
+            pn.Row(
+                self.pulse_duration_slider, 
+                self.pulse_duration_unit_selector, 
+                self.randomize_pulse_duration,
+                self.pulse_duration_range_slider),  # Pulse duration range slider
+            
+            # Period or frequency with unit selector and randomize options
             self.period_frequency_group,
-            pn.Row(self.period_frequency_value_input, self.randomize_period_frequency_value),
-            pn.Row(self.number_of_events_input, self.randomize_number_of_events),
-            pn.Row(self.duration_between_events_slider, self.randomize_duration_between_events),
+            pn.Row(
+                self.period_frequency_value_input, 
+                self.period_frequency_unit_selector, 
+                self.randomize_period_frequency_value,
+                self.period_frequency_range_slider),  # Period/Frequency range slider
+            pn.Row(
+                self.number_of_events_input,
+                self.randomize_number_of_events,
+                self.number_of_events_range_slider),
+            # Duration between events with unit selector and randomize options
+            pn.Row(
+                self.duration_between_events_slider, 
+                self.duration_between_events_unit_selector, 
+                self.randomize_duration_between_events,
+                self.duration_between_events_range_slider),  # Duration between events range slider
+            
+            # Dynamic text updates based on waveform type
             self.phase_text,
             self.sinusoidal_calculation_text,
         )
+
         # Train Settings layout
         train_settings_layout = pn.Column(
             self.accept_external_trigger,
-            pn.Row(self.number_of_trains_input,self.randomize_number_of_trains),
-            pn.Row(self.train_duration_slider,self.randomize_train_duration),
-        )
-        
+            pn.Row(self.number_of_trains_input, self.randomize_number_of_trains, self.number_of_trains_range_slider),
+            pn.Row(self.train_duration_slider, self.train_duration_unit_selector, self.randomize_train_duration, self.train_duration_range_slider),
+        )        
         external_trigger_layout = pn.Column(
-            self.external_trigger_duration,
-            self.randomize_external_trigger,
+            pn.Row(self.external_trigger_duration, self.external_trigger_duration_unit_selector, self.randomize_external_trigger, self.external_trigger_duration_range_slider),
             self.set_to_pulse_duration,
         )
         
@@ -376,6 +285,7 @@ class DynamicStimGui:
             ('Projected Graphs', self.projected_graphs_layout),
             ('Channel Select', self.channel_select_layout)
         )
+        self._update_visibility_and_content()
     def _connect_callbacks(self):
         #Event Settings
         self.waveform_group.param.watch(self._update_visibility_and_content, 'value')
@@ -383,12 +293,26 @@ class DynamicStimGui:
         self.amplitude_slider.param.watch(self._update_visibility_and_content, 'value')
         self.period_frequency_group.param.watch(self._update_visibility_and_content, 'value')
         self.period_frequency_value_input.param.watch(self._update_visibility_and_content, 'value')
+        self.modulation_type_group.param.watch(self._update_visibility_and_content, 'value')
+        #self.phase_text.param.watch(self._update_visibility_and_content, 'value')
+
+        # Randomize button clicks
         self.randomize_amplitude.on_click(self._randomize_amplitude)
         self.randomize_pulse_duration.on_click(self._randomize_pulse_duration)
         self.randomize_number_of_events.on_click(self._randomize_number_of_events)
         self.randomize_duration_between_events.on_click(self._randomize_duration_between_events)
-        self.randomize_period_frequency_value.on_click(self._randomize_period_frequency_value)        
-        
+        self.randomize_period_frequency_value.on_click(self._randomize_period_frequency_value)
+
+        # No 'on_click' event for RangeSlider or Select widget, use 'value' watchers
+        # No actions defined in your provided code for unit selectors, assuming no direct action needed
+
+        # Adding missing param.watch for range sliders - should watch 'value', not 'on_click'
+        self.amplitude_range_slider.param.watch(lambda event: self._update_range('amplitude', event.new), 'value')
+        self.pulse_duration_range_slider.param.watch(lambda event: self._update_range('pulse_duration', event.new), 'value')
+        self.period_frequency_range_slider.param.watch(lambda event: self._update_range('period_frequency', event.new), 'value')
+        self.duration_between_events_range_slider.param.watch(lambda event: self._update_range('duration_between_events', event.new), 'value')
+
+
         #Train Settings
         self.number_of_trains_input.param.watch(self._update_train_settings, 'value')
         self.train_duration_slider.param.watch(self._update_train_settings, 'value')
@@ -396,11 +320,28 @@ class DynamicStimGui:
         self.randomize_number_of_trains.on_click(self._randomize_number_of_trains)
         self.randomize_train_duration.on_click(self._randomize_train_duration)
         
+
+        # Add watchers for the new range sliders and unit selectors
+        self.train_duration_unit_selector.param.watch(self._update_train_settings, 'value')
+        self.train_duration_range_slider.param.watch(lambda event: self._randomize_train_duration_range(event.new), 'value')
         # Ensure updates to Train Duration are based on Event Settings
 
         #External Trigger Settings
         self.randomize_external_trigger.on_click(self._randomize_external_trigger)
-        self.set_to_pulse_duration.on_click(self._set_to_pulse_duration)
+        self.set_to_pulse_duration.on_click(self._on_event_settings_changed)
+        #self.external_trigger_duration_unit_selector.param.watch(self._on_event_settings_changed, 'value')
+        self.external_trigger_duration_range_slider.param.watch(lambda event: self._randomize_external_trigger_duration_range(event.new), 'value')
+
+        # Ensure updates based on event settings changes
+        self.amplitude_slider.param.watch(lambda event: self._update_time_based_on_event_settings(), 'value')
+        self.pulse_duration_slider.param.watch(self._on_event_settings_changed, 'value')
+        self.duration_between_events_slider.param.watch(self._on_event_settings_changed, 'value')
+        self.number_of_events_input.param.watch(self._on_event_settings_changed, 'value')
+        #self.pulse_duration_unit_selector.watch(self._on_event_settings_changed, 'value')
+        #self.duration_between_events_unit_selector.watch(self._on_event_settings_changed, 'value')
+
+    def _on_event_settings_changed(self, event):
+        self._update_external_trigger_settings_based_on_event_duration()
 
         #GRAPHING
         self.amplitude_slider.param.watch(lambda event: self.update_projected_graphs(), 'value')
@@ -414,32 +355,63 @@ class DynamicStimGui:
         
         self.accept_external_trigger.param.watch(lambda event: self.update_projected_graphs(), 'value')
         self.external_trigger_duration.param.watch(lambda event: self.update_projected_graphs(), 'value')
+        
+
+        #   selectors
+        self.amplitude_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
+        self.period_frequency_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
+        self.duration_between_events_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
+        self.train_duration_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
+        self.external_trigger_duration_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
 
 
         ### Channel Setting
         self.random_ca_button.on_click(self.randomize_cathode_anode)
 
 
-    def _update_visibility_and_content(self, event):
+    def _update_visibility_and_content(self, event=None):
         is_sinusoidal = self.waveform_group.value == 'Sinusoidal'
+        is_period_selected = self.period_frequency_group.value == 'Period'
+
+        # Update visibility based on waveform type
         self.pulse_duration_slider.visible = not is_sinusoidal
-        self.randomize_pulse_duration.visible = not is_sinusoidal
+        self.pulse_duration_unit_selector.visible = not is_sinusoidal and self.pulse_duration_slider.visible  # Ensure units follow the same visibility
+        self.randomize_pulse_duration.visible = not is_sinusoidal  # Update to ensure range slider follows visibility
+        self.pulse_duration_range_slider.visible = not is_sinusoidal  # Update to ensure range slider follows visibility
+        
+        # Period/Frequency visibility logic
         self.period_frequency_group.visible = is_sinusoidal
         self.period_frequency_value_input.visible = is_sinusoidal
+        self.period_frequency_unit_selector.visible = is_sinusoidal and is_period_selected
+        self.period_frequency_range_slider.visible = is_sinusoidal  # Ensure it's only visible when 'Period' is selected
         self.randomize_period_frequency_value.visible = is_sinusoidal
-        self.sinusoidal_calculation_text.visible = is_sinusoidal
+
         self.duration_between_events_slider.visible = self.number_of_events_input.value > 1
+        self.duration_between_events_unit_selector.visible = self.number_of_events_input.value > 1  # Show/Hide unit selector for duration between events
         self.randomize_duration_between_events.visible = self.number_of_events_input.value > 1
-        self.phase_text.visible = self.waveform_group.value == 'Biphasic'
+        self.duration_between_events_range_slider.visible = self.number_of_events_input.value > 1  # Show/Hide range slider for duration between events
+
         
+        
+        # Update unit selectors based on modulation type
+        if self.modulation_type_group.value == 'Current':
+            self.amplitude_unit_selector.options = ['uA', 'mA', 'A']
+        else:  # Voltage
+            self.amplitude_unit_selector.options = ['uV', 'mV', 'V']
+        
+        # Biphasic-specific logic
         if self.waveform_group.value == 'Biphasic':
             if self.amplitude_slider.value < 0:
                 self.phase_text.object = "Phase: Cathode Leading"
             elif self.amplitude_slider.value > 0:
                 self.phase_text.object = "Phase: Anode Leading"
             else:
-                self.phase_text.object = "Phase: None"
-        
+                self.phase_text.object = "Phase: Neither"
+            self.phase_text.visible = True  # Show the text only if 'Biphasic' is selected
+        else:
+            self.phase_text.visible = False  # Hide the text for non-Biphasic waveforms
+
+        # Update text and calculations for sinusoidal waveform
         if is_sinusoidal:
             self.period_frequency_value_input.name = self.period_frequency_group.value
             if self.period_frequency_group.value == 'Period':
@@ -448,20 +420,25 @@ class DynamicStimGui:
             else:
                 period = 1 / self.period_frequency_value_input.value if self.period_frequency_value_input.value != 0 else 0
                 self.sinusoidal_calculation_text.object = f"Calculated Period: {period} seconds"
+            self.sinusoidal_calculation_text.visible = True  # Show the text only if 'Biphasic' is selected
+        else:
+            self.sinusoidal_calculation_text.visible = False
+
+
     def _randomize_amplitude(self, event):
-        self.amplitude_slider.value = np.random.randint(self.amplitude_slider.start, self.amplitude_slider.end)
+        self.amplitude_slider.value = random.randint(*self.amplitude_range_slider.value)
 
     def _randomize_pulse_duration(self, event):
-        self.pulse_duration_slider.value = np.random.randint(self.pulse_duration_slider.start, self.pulse_duration_slider.end)
-
-    def _randomize_number_of_events(self, event):
-        self.number_of_events_input.value = np.random.randint(self.number_of_events_input.start, self.number_of_events_input.end + 1)
-
-    def _randomize_duration_between_events(self, event):
-        self.duration_between_events_slider.value = np.random.randint(self.duration_between_events_slider.start, self.duration_between_events_slider.end)
+        self.pulse_duration_slider.value = random.randint(*self.pulse_duration_range_slider.value)
 
     def _randomize_period_frequency_value(self, event):
-        self.period_frequency_value_input.value = np.random.randint(self.period_frequency_value_input.start, self.period_frequency_value_input.end + 1)
+        self.period_frequency_value_input.value = random.randint(*self.period_frequency_range_slider.value)
+    
+    def _randomize_number_of_events(self, event):
+        self.number_of_events_input.value = random.randint(*self.number_of_events_range_slider.value)
+
+    def _randomize_duration_between_events(self, event):
+        self.duration_between_events_slider.value = random.randint(*self.duration_between_events_range_slider.value)
 
     def _update_train_settings(self, event):
         # Calculate the minimum value for the train duration slider
@@ -491,49 +468,112 @@ class DynamicStimGui:
         max_duration = self.train_duration_slider.value  # Assuming this is the maximum
         self.external_trigger_duration.value = np.random.randint(0, max_duration + 1)
     
-    def _set_to_pulse_duration(self, event):
-        duration_between_events = self.duration_between_events_slider.value if self.number_of_events_input.value > 1 else 0
-        if self.waveform_group.value == 'Monophasic':
-            self.external_trigger_duration.value = (self.pulse_duration_slider.value + duration_between_events) * self.number_of_events_input.value
-        elif self.waveform_group.value == 'Biphasic':
-            self.external_trigger_duration.value = (2 * self.pulse_duration_slider.value + duration_between_events) * self.number_of_events_input.value
-        elif self.waveform_group.value == 'Sinusoidal':
-            self.external_trigger_duration.value = (self.period_frequency_value_input.value + duration_between_events) * self.number_of_events_input.value
+    def _calculate_total_event_duration(self):
+        # Assuming the pulse_duration_slider value is in the unit selected in pulse_duration_unit_selector
+        unit_multiplier = {'us': 1, 'ms': 1000, 's': 1000000}
+        pulse_duration_in_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
+        
+        # Same for duration between events
+        duration_between_events_in_us = self.duration_between_events_slider.value * unit_multiplier[self.duration_between_events_unit_selector.value]
+        
+        # Total duration of all events in microseconds
+        total_event_duration_in_us = (pulse_duration_in_us + duration_between_events_in_us) * self.number_of_events_input.value
+        return total_event_duration_in_us
     
-    
+    def _convert_duration_and_unit(self, duration_microseconds):
+        if duration_microseconds >= 1000000:  # More than 1 second
+            return 's', duration_microseconds / 1000000
+        elif duration_microseconds >= 1000:  # More than 1 millisecond
+            return 'ms', duration_microseconds / 1000
+        else:
+            return 'us', duration_microseconds
+
+    def _update_external_trigger_settings_based_on_event_duration(self):
+        total_event_duration_in_us = self._calculate_total_event_duration()
+        recommended_unit, converted_duration = self._convert_duration_and_unit(total_event_duration_in_us)
+        
+        # Update the external trigger duration unit selector and value
+        self.external_trigger_duration_unit_selector.value = recommended_unit
+        self.external_trigger_duration.value = converted_duration
+    def _update_time_based_on_event_settings(self):
+        # Example of calculating total event duration and deciding the unit
+        total_duration = self._calculate_total_event_duration()
+        recommended_unit, converted_duration = self._convert_duration_and_unit(total_duration)
+
+        # Update external trigger duration and unit based on calculations
+        self.external_trigger_duration_unit_selector.value = recommended_unit
+        self.external_trigger_duration.value = converted_duration
+
+        # You might need a similar method for updating train settings
+
+    def _convert_duration_and_unit(self, duration_microseconds):
+        if duration_microseconds >= 1_000_000:  # More than 1 second
+            return 's', duration_microseconds / 1_000_000
+        elif duration_microseconds >= 1_000:  # More than 1 millisecond
+            return 'ms', duration_microseconds / 1_000
+        else:
+            return 'us', duration_microseconds
+
+    def _randomize_train_duration_range(self, new_range):
+        # Assuming new_range is a tuple (min, max)
+        self.train_duration_slider.value = random.randint(new_range[0], new_range[1])
+
+    def _randomize_external_trigger_duration_range(self, new_range):
+        # Adjust the external trigger duration within the new range
+        self.external_trigger_duration.value = random.randint(new_range[0], new_range[1])
+
     
     #GRAPHING
     def update_projected_graphs(self):
-        # Generate plots based on current inputs
+        unit_multiplier = {'us': 1, 'ms': 1000, 's': 1000000}
+        unit_multiplier_volt = {'uV': 1, 'mV': 1000, 'V': 1000000}
+        unit_multiplier_amp = {'uA': 1, 'mA': 1000, 'A': 1000000}
+        
+        # Calculate necessary values
+        pulse_duration_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
+        duration_between_events_us = self.duration_between_events_slider.value * unit_multiplier[self.duration_between_events_unit_selector.value]
+        trigger_duration_us = self.external_trigger_duration.value * unit_multiplier[self.external_trigger_duration_unit_selector.value]
+        
+        # Decide amplitude unit multiplier based on modulation type
+        if self.modulation_type_group.value == 'Voltage':
+            #amplitude_uA_uV = self.amplitude_slider.value * unit_multiplier_volt[self.amplitude_unit_selector.value]
+            modulation_type_val = self.amplitude_unit_selector.value
+        else:  # Current
+            #amplitude_uA_uV = self.amplitude_slider.value * unit_multiplier_amp[self.amplitude_unit_selector.value]
+            modulation_type_val = self.amplitude_unit_selector.value
+        
+        delay_between_trains_us = self.train_duration_slider.value * unit_multiplier[self.train_duration_unit_selector.value]
+        # Generate the single event plot
         single_event_plot = self.generate_single_event_plot(
-                self.amplitude_slider.value, 
-                self.pulse_duration_slider.value, 
-                self.waveform_group.value, 
-                self.external_trigger_duration.value,
-                self.duration_between_events_slider.value if self.number_of_events_input.value > 1 else 0, 
-                self.number_of_events_input.value, 
-                self.period_frequency_value_input.value,
-                self.period_frequency_group.value
-                
-            )
-
+            self.amplitude_slider.value, 
+            pulse_duration_us, 
+            self.waveform_group.value, 
+            trigger_duration_us,
+            duration_between_events_us if self.number_of_events_input.value > 1 else 0, 
+            self.number_of_events_input.value, 
+            self.period_frequency_value_input.value,
+            self.period_frequency_group.value,
+            modulation_type_val
+        )
         full_sequence_plot = self.generate_full_sequence_plot(
             self.amplitude_slider.value, 
-            self.pulse_duration_slider.value, 
-            self.waveform_group.value, 
-            self.number_of_events_input.value, 
-            self.duration_between_events_slider.value if self.number_of_events_input.value > 1 else 0, 
-            self.external_trigger_duration.value,
+            pulse_duration_us, 
+            self.waveform_group.value,
+            self.number_of_events_input.value,
+            duration_between_events_us,
+            trigger_duration_us,
             self.number_of_trains_input.value,
-            self.train_duration_slider.value,
+            delay_between_trains_us,
             self.period_frequency_value_input.value,
-            self.period_frequency_group.value
+            self.period_frequency_group.value,
+            modulation_type_val
+
         )
 
         self.projected_graphs_layout.clear()
         self.projected_graphs_layout.extend([pn.panel(single_event_plot), pn.panel(full_sequence_plot)])
 
-    def generate_single_event_plot(self, amplitude, pulse_duration, waveform_type, trigger_duration, duration_between_events, number_of_events, period_frequency, period_frequency_type):
+    def generate_single_event_plot(self, amplitude, pulse_duration, waveform_type, trigger_duration, duration_between_events, number_of_events, period_frequency, period_frequency_type, modulation_type):
         # Logic for single event plot generation adjusted for correct sine wave...
         event_duration = self._calculate_event_length(waveform_type, pulse_duration, duration_between_events, number_of_events)
         time = np.linspace(-event_duration/10, event_duration+event_duration/10, 10000)
@@ -584,12 +624,12 @@ class DynamicStimGui:
             x='Time', y=['Pulse', 'Trigger'], color=['blue', 'red'], height=400, width=600,
             xlim=(-event_duration / 10, event_duration + event_duration / 10),  # Example axis limits
             ylim=(-1.1 * abs(amplitude), 1.1 * abs(amplitude)),
-            xlabel='Time (s)', ylabel='Amplitude'
+            xlabel='Time (us)', ylabel=f'Amplitude ({modulation_type})'
         ).opts(title="Single Event Plot", framewise=True, shared_axes=False)
         return plot
 
 
-    def generate_full_sequence_plot(self, amplitude, pulse_duration, waveform_type, number_of_events, duration_between_events, trigger_duration, number_of_trains, delay_between_trains, period_frequency, period_frequency_type):
+    def generate_full_sequence_plot(self, amplitude, pulse_duration, waveform_type, number_of_events, duration_between_events, trigger_duration, number_of_trains, delay_between_trains, period_frequency, period_frequency_type, modulation_type):
         
         if waveform_type == 'Sinusoidal':
             # Calculate waveform duration based on input type (period or frequency)
@@ -657,7 +697,7 @@ class DynamicStimGui:
             x='Time', y='Pulse', color='blue', height=400, width=800,
             xlim=(0, total_simulation_duration),
             ylim=(-1.1 * abs(amplitude), 1.1 * abs(amplitude)),
-            xlabel='Time (s)', ylabel='Amplitude'
+            xlabel='Time (us)', ylabel=f'Amplitude ({modulation_type})'
         ).opts(title="Full Sequence Plot", framewise=True, shared_axes=False) * \
         df.hvplot.line(x='Time', y='Trigger', color='red', height=400, width=800).opts(framewise=True, shared_axes=False)
         return plot
@@ -693,79 +733,202 @@ class DynamicStimGui:
 
 
     def _setup_finalize_tab(self):
-        # Comment Input
         self.comment_input = pn.widgets.TextInput(name="Comments", placeholder="Add any comment here...")
-
-        # Save .dat File Button
+        self.save_config_button = pn.widgets.Button(name="Save Configuration", button_type="primary")
         self.save_dat_button = pn.widgets.Button(name="Save .dat File", button_type="success")
-        self.save_dat_button.on_click(self.save_dat_file)
-
-        # Run Stimulation Button
         self.run_stimulation_button = pn.widgets.Button(name="Run Stimulation", button_type="primary")
+        self.back_button = pn.widgets.Button(name="Back", button_type="danger", visible=False)
+        self.directory_selector = pn.widgets.FileSelector('~')
+        self.download_json = pn.widgets.Button(name="Download .JSON", button_type="success", visible=False)
+        self.download_dat = pn.widgets.Button(name="Download .DAT", button_type="success", visible=False)
+        self.filename_input = pn.widgets.TextInput(name="Filename", placeholder="Enter filename here", visible=False)
+        self.file_extension_label_json = pn.pane.Markdown(".json", visible=False)  # Default to .json; adjust as needed
+        self.file_extension_label_dat = pn.pane.Markdown(".dat", visible=False)  # Default to .json; adjust as needed    
+        # Setup the FileDownload widget without a file for now
+        self.file_download = pn.widgets.FileDownload(filename='', label='Download File', button_type='primary', auto=False, visible=False)
+
+        self.upload_settings_button = pn.widgets.FileInput(accept='.json')
+
+        # Connecting buttons to their callbacks
+        self.save_config_button.on_click(self.set_configuration)
+        self.save_dat_button.on_click(self.set_dat_file)
         self.run_stimulation_button.on_click(self.run_stimulation)
+        self.back_button.on_click(self.show_original_finalize_layout)
+        self.download_json.on_click(self.download_configuration)
+        self.download_dat.on_click(self.download_dat_file)
+        self.upload_settings_button.param.watch(self.load_settings_from_file, 'value')
 
-        # Finalize Button - to update the table
-        self.update_table_button = pn.widgets.Button(name="Update Table", button_type="primary")
-        self.update_table_button.on_click(self.update_table_data)
+        
+        self.dynamic_finalize_layout = pn.Column(
+        self.comment_input,
+        self.save_config_button,
+        self.save_dat_button,
+        self.run_stimulation_button,
+        self.upload_settings_button,
+        #self.file_download  # Include the FileDownload widget in the layout
+        )
+        self.table = pn.pane.DataFrame(pd.DataFrame())
+        self.finalize_tab_layout = pn.Row(self.table, self.dynamic_finalize_layout)
+        #self.update_table_data(None)
+        self.on_any_change(None)
+        self.tabs.append(('Finalize', self.finalize_tab_layout))
 
-        self.table = pn.pane.DataFrame(pd.DataFrame(), index=False)
-        self.update_table_data  # Populate the table with initial data
+    def set_configuration(self, event):
+        self.dynamic_finalize_layout.clear()
+        self.dynamic_finalize_layout.extend([
+            pn.pane.Markdown('You are almost there! Set the file location for your .json file.'),
+            self.back_button,
+            pn.Row(self.filename_input,self.file_extension_label_json),
+            self.directory_selector,
+            self.download_json
+        ])
+        self.back_button.visible = True
+        self.directory_selector.visible = True
+        self.download_json.visible = True
+        self.filename_input.visible = True
+        self.file_extension_label_json.visible = True
+
+    def set_dat_file(self, event):
+        self.dynamic_finalize_layout.clear()
+        self.dynamic_finalize_layout.extend([
+            pn.pane.Markdown('You are almost there! Set the file location for your .dat file.'),
+            self.back_button,
+            pn.Row(self.filename_input, self.file_extension_label_dat),
+            self.directory_selector,
+            self.download_dat
+        ])
+        self.filename_input.visible = True
+        self.back_button.visible = True
+        self.directory_selector.visible = True
+        self.download_dat.visible = True
+        self.file_extension_label_dat.visible = True
+    
+    def download_configuration(self, event):
+        # Save the current configuration to a JSON file
+        selected_directory = self.directory_selector.value[0]  # Assuming the directory is the first selected item
+        filename = f"{self.filename_input.value}.json"  # Construct filename with extension
+        config_path = os.path.join(selected_directory, filename)  # Combine into a full path
+        config = {
+            "waveform": self.waveform_group.value,
+            "modulation_type": self.modulation_type_group.value,
+            "amplitude": self.amplitude_slider.value,
+            "pulse_duration": self.pulse_duration_slider.value,
+            "number_of_events": self.number_of_events_input.value,
+            "duration_between_events": self.duration_between_events_slider.value,
+            "period_frequency_type": self.period_frequency_group.value,  # 'Period' or 'Frequency'
+            "period_frequency_value": self.period_frequency_value_input.value,
+            "total_trains": self.number_of_trains_input.value,
+            "train_duration": self.train_duration_slider.value,
+            "accept_external_trigger": self.accept_external_trigger.value,
+            "external_trigger_duration": self.external_trigger_duration.value,
+            # Add amplitude, pulse_duration, and duration units if you need them
+            "amplitude_unit": self.amplitude_unit_selector.value,
+            "pulse_duration_unit": self.pulse_duration_unit_selector.value,
+            "duration_between_events_unit": self.duration_between_events_unit_selector.value,
+            "train_duration_unit": self.train_duration_unit_selector.value,
+            "external_trigger_duration_unit": self.external_trigger_duration_unit_selector.value,
+            # Channel configurations
+            "channel_configurations": {f"Channel {i+1}": widget.value for i, widget in enumerate(self.channel_select_widgets)}
+        }
+
+        # Define the path where the config JSON will be saved
+        #config_path = os.path.join(os.getcwd(), 'config.json')
+
+        # Write the configuration dictionary to a JSON file
+        #with open(config_path, 'w') as f:
+        #    json.dump(config, f, indent=4)  # Use indent for pretty-printing
+        with open(config_path, 'w') as config_file:
+            json.dump(config, config_file, indent=4)
+
+        # Show the UI elements for downloading the saved configuration
+        self.show_original_finalize_layout()
+        #self.switch_to_file_save_ui('Configuration saved. Ready to download.')
+
+    def download_dat_file(self, event):
+        selected_directory = self.directory_selector.value[0]  # Assuming the directory is the first selected item
+        filename = f"{self.filename_input.value}.dat"  # Construct filename with extension
+        file_path = os.path.join(selected_directory, filename)  # Combine into a full path
         
-        # Adding the comment input and button to the layout
-        finalize_layout = pn.Column(self.comment_input, self.update_table_button, self.save_dat_button, self.run_stimulation_button, self.table)
-        
-        # Add this layout to the tabs
-        self.tabs.append(('Finalize', finalize_layout))
-    def save_dat_file(self, event):
-        # Assume 'create_dat_file' is a method in STGDeviceController class that creates a .dat file
-        # The method might look something like controller.create_dat_file(file_path, channels_data)
-        if not hasattr(self, 'controller'):
-            print("Controller not set up properly.")
-            return
-        
-        file_path = os.path.join(os.getcwd(), "output.dat")  # Save in current working directory
-        channels_data = self.controller.dat_data()  # Assume this method retrieves the channels data
-        self.update_table_data
+        # Generate .dat file content
+        channels_data = self.controller.dat_data()
         self.controller.create_dat_file(file_path, channels_data)
-        print(f"Saved .dat file at {file_path}")
+        print(file_path, channels_data)
+        self.show_original_finalize_layout()
+
+    def show_original_finalize_layout(self, event=None):
+        self.dynamic_finalize_layout.clear()
+        self.dynamic_finalize_layout.extend([
+            self.comment_input,
+            self.save_config_button,
+            self.save_dat_button,
+            self.run_stimulation_button,
+            self.upload_settings_button,
+        ])
+        self.back_button.visible = False
+        self.directory_selector.visible = False
+        self.download_json.visible = False
+        self.download_dat.visible = False
+    def on_any_change(self, event):
+        self.update_table_data(None)
+
+        # Example of connecting widgets to the on_any_change method
+        watched_widgets = [
+            self.waveform_group, self.modulation_type_group, self.amplitude_slider, 
+            self.pulse_duration_slider, self.number_of_events_input, self.duration_between_events_slider,
+            self.period_frequency_group, self.period_frequency_value_input, self.number_of_trains_input,
+            self.train_duration_slider, self.accept_external_trigger, self.external_trigger_duration,
+            # Include any other widgets that affect the table data
+        ]
+
+        for widget in watched_widgets:
+            widget.param.watch(self.on_any_change, 'value')
+
+    #def download_file(self, event):
+        # Logic to handle file download; specifics depend on your app's structure
+        # For a web app, you might provide a link to the file or use JavaScript for downloading
+        #path_given = self.directory_selector.value[0]
+        #print(path_given)
+        #file_path = os.path.join(path_given, "output.dat")  # Or whatever your file path is
+        #file_url = f"{file_path}"  # Adjust based on how files are served in your environment
+        
+        # Clear the dynamic layout and add a markdown with the download link
+        #self.dynamic_finalize_layout.clear()
+        #download_link = f"[Downloaded {file_url})"
+        #self.dynamic_finalize_layout.append(pn.pane.Markdown(download_link))
 
     def run_stimulation(self, event):
-        # This method would trigger the stimulation process
-        # For example, it could call a method in the STGDeviceController class
-        if not hasattr(self, 'controller'):
-            print("Controller not set up properly.")
-            return
-        self.update_table_data
-        self.controller.run_simulation()  # Assuming 'run_simulation' is a method in STGDeviceController
-        print("Stimulation run initiated.")
+        # Your existing logic for running stimulation
+        self.update_table_data(None)
 
     def update_table_data(self, event):
         # Initialize data collection
+        total_event_duration_in_us = self._calculate_total_event_duration()
+        recommended_unit, converted_duration = self._convert_duration_and_unit(total_event_duration_in_us)
+        
+        # Update the data dictionary with calculated values
         data = {
             "Parameter": [
                 "Waveform", "Voltage or Current", "Amplitude", "Pulse Duration",
-                "Phase", self.period_frequency_group.value, "Calculated Frequency",
-                "Event Count", "Event Duration", "External Triggering",
-                "Total Trains", "Time Between Trains", "External Signal Duration",
-                "Comments"
+                "Phase", self.period_frequency_group.value, "Event Count",
+                "Event Duration", "External Triggering", "Total Trains",
+                "Time Between Trains", "External Signal Duration", "Comments"
             ],
             "Value": [
                 self.waveform_group.value,
                 self.modulation_type_group.value,
-                f"{self.amplitude_slider.value} uA",
-                f"{self.pulse_duration_slider.value} us",
-                self.phase_text.object,
-                f"{self.period_frequency_value_input.value}",
-                "Calculated value here",  # You need to calculate this based on your logic
+                f"{self.amplitude_slider.value} {self.amplitude_unit_selector.value}",
+                f"{self.pulse_duration_slider.value} {self.pulse_duration_unit_selector.value}",
+                self.phase_text.object if self.phase_text.visible else "N/A",
+                f"{self.period_frequency_value_input.value} {self.period_frequency_unit_selector.value if self.period_frequency_group.visible else 'N/A'}",
                 self.number_of_events_input.value,
-                f"{self.duration_between_events_slider.value if self.number_of_events_input.value > 1 else 0} ms",
+                f"{converted_duration} {recommended_unit}",
                 "Yes" if self.accept_external_trigger.value else "No",
                 self.number_of_trains_input.value,
-                f"{self.train_duration_slider.value} ms",
-                f"{self.external_trigger_duration.value} us",
-                self.comment_input.value  # Make sure to include the TextInput widget for comments in your class
+                f"{self.train_duration_slider.value} {self.train_duration_unit_selector.value}",
+                f"{self.external_trigger_duration.value} {self.external_trigger_duration_unit_selector.value}",
+                self.comment_input.value
             ]
-        }
+            }
 
         # Collect channel configurations
         channel_configs = {"Floating": [], "Cathode": [], "Anode": [], "Ground": []}
@@ -781,7 +944,40 @@ class DynamicStimGui:
         self.df = pd.DataFrame(data)
         self.table.object = self.df#.to_dict('list')  # Update the DataFrame widget with new data
 
+    def load_settings_from_file(self, event):
+        # Parse the uploaded file's content
+        file_val = self.upload_settings_button.value
+        
+        #print(file_val)
+        file_content = json.loads(file_val)
+        
+        # Update GUI widgets with settings from file
+        self.waveform_group.value = file_content['waveform']
+        self.modulation_type_group.value = file_content['modulation_type']
+        self.amplitude_slider.value = file_content['amplitude']
+        self.pulse_duration_slider.value = file_content['pulse_duration']
+        self.number_of_events_input.value = file_content['number_of_events']
+        self.duration_between_events_slider.value = file_content['duration_between_events']
+        self.period_frequency_group.value = file_content['period_frequency_type'] if 'period_frequency_type' in file_content else 'Period'
+        self.period_frequency_value_input.value = file_content['period_frequency_value']
+        self.number_of_trains_input.value = file_content['total_trains']
+        self.train_duration_slider.value = file_content['train_duration']
+        self.accept_external_trigger.value = file_content['accept_external_trigger']
+        self.external_trigger_duration.value = file_content['external_trigger_duration']
+        self.amplitude_unit_selector.value = file_content['amplitude_unit']
+        self.pulse_duration_unit_selector.value = file_content['pulse_duration_unit']
+        self.duration_between_events_unit_selector.value = file_content['duration_between_events_unit']
+        self.train_duration_unit_selector.value = file_content['train_duration_unit']
+        self.external_trigger_duration_unit_selector.value = file_content['external_trigger_duration_unit']
+        #print('MY VALUES:', self.waveform_group.value, 'Modulation type:', self.modulation_type_group.value)
+        # Update channel configurations
+        for channel_label, setting in file_content['channel_configurations'].items():
+            channel_index = int(channel_label.split(' ')[1]) - 1  # Convert channel label to index
+            self.channel_select_widgets[channel_index].value = setting
 
+        # Ensure GUI updates are applied properly
+        self._update_visibility_and_content()
+        self.update_table_data(None)
 
 
 
@@ -792,4 +988,4 @@ class DynamicStimGui:
 stim_gui = DynamicStimGui()
 controller = STGDeviceController(stim_gui)
 stim_gui.controller = controller
-stim_gui.show().servable().show(8080)
+stim_gui.show().servable().show('Stimulation Gui')
