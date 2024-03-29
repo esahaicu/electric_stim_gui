@@ -33,9 +33,16 @@ from Mcs.Usb import STG_DestinationEnumNet
 import math
 from System import Array, UInt32, Int32, UInt64
 
+import logging
+pn.extension('terminal', console_output='disable')
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger("my_app_logger")
+
+
 class STGDeviceController:
-    def __init__(self, gui_instance):
+    def __init__(self, gui_instance, logger):
         self.gui = gui_instance
+        self.logger = logger  # Use the passed logger
         self.stim_amplitude_arr = []
         self.stim_duration_arr = []
         self.sync_amplitude_arr = []
@@ -128,7 +135,7 @@ class STGDeviceController:
         self.stim_amplitude_arr.append(0)
         self.stim_duration_arr.append(delay_duration)
     @staticmethod
-    def prepare_device_data(amplitude_arr, duration_arr):
+    def prepare_device_data(self, amplitude_arr, duration_arr):
         encoded_amplitude = []
         for amp in amplitude_arr:
             magnitude = abs(amp) & 0xFFF
@@ -141,7 +148,7 @@ class STGDeviceController:
 
             # Convert encoded_value to int for formatting purposes
             formatted_value = (encoded_value)
-            print(f"Encoded: {formatted_value} | Binary: {formatted_value:016b}")
+            self.logger.debug(f"Encoded: {formatted_value} | Binary: {formatted_value:016b}")
             encoded_amplitude.append(encoded_value)
 
         pData = Array[UInt16](UInt16(d) for d in encoded_amplitude)
@@ -171,7 +178,7 @@ class STGDeviceController:
         channelmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Activate the first channel
         syncoutmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Sync signal for synchronization
         repeat = Array[UInt32]([0] * trigger_inputs)  # Infinite repeat for simplicity
-        print(channelmap)
+        self.logger.debug(channelmap)
         device.SetupTrigger(UInt32(0), channelmap, syncoutmap, repeat)
 
         # Clear any previous data on the channel and sync output
@@ -182,19 +189,19 @@ class STGDeviceController:
         device.SendChannelData(UInt32(0), pData, tData)
 
         # For synchronization signal, assuming simple on/off logic
-        print(sync_pData)
+        #self.logger.debug(sync_pData)
         device.SendSyncData(UInt32(0), sync_pData, sync_tData)
 
         # Start the stimulation based on the trigger configuration
         device.SendStart(UInt32(1))
 
-        print("Stimulation started. Please wait for completion...")
+        self.logger.debug("Stimulation started. Please wait for completion...")
         
         # Wait for stimulation to complete based on the duration (simplified)
         total_duration = (sum(self.stim_duration_arr)/1000000) #+ 0.00001  # Convert µs to seconds
         time.sleep(total_duration)
         device.SendStop(1)
-        print("Stimulation completed. Disconnecting from device.")
+        self.logger.debug("Stimulation completed. Disconnecting from device.")
         device.Disconnect()
 
     def dat_data(self):
@@ -265,11 +272,11 @@ class STGDeviceController:
     
     def start_stimulation(self):
         def PollHandler(status, stgStatusNet, index_list):
-            print('%x %s' % (status, str(stgStatusNet.TiggerStatus[0])))
+            self.logger.debug('%x %s' % (status, str(stgStatusNet.TiggerStatus[0])))
 
         deviceList = CMcsUsbListNet(DeviceEnumNet.MCS_DEVICE_USB)
         if deviceList.Count == 0:
-            print("No devices found")
+            self.logger.debug("No devices found")
             return
 
         device = CStg200xDownloadNet()
@@ -280,16 +287,21 @@ class STGDeviceController:
 
 
 class DynamicStimGui:
-    def __init__(self):
+    def __init__(self,logger=None):
+        self.logger = logger
         self.channel_buttons = {}  # Stores RadioButtonGroup for each channel
         self._setup_widgets()
         self._setup_layout()
         self._connect_callbacks()
         self._setup_finalize_tab()
+        self._setup_logging_and_debugger()
         #self.upload_old_settings_button = pn.widgets.FileInput(accept='.json', name='Upload Old Settings')
 
-
-    
+    def _setup_logging_and_debugger(self):
+        # Setup logging and debugger as before
+        self.debugger = pn.widgets.Debugger(name='My Debugger', level=logging.DEBUG, 
+                                            logger_names=['my_app_logger'], 
+                                            formatter_args={'fmt':'%(asctime)s [%(name)s - %(levelname)s]: %(message)s'})    
     def _setup_widgets(self):
 
         ### THIS IS THE SECTION THAT DEFINES THE EVENT SELECTION
@@ -911,31 +923,38 @@ class DynamicStimGui:
         self.directory_selector = pn.widgets.FileSelector('~')
         self.download_json = pn.widgets.Button(name="Download .JSON", button_type="success", visible=False)
         self.download_dat = pn.widgets.Button(name="Download .DAT", button_type="success", visible=False)
+        self.start_run = pn.widgets.Button(name="START", button_type="success", visible=False)
         self.filename_input = pn.widgets.TextInput(name="Filename", placeholder="Enter filename here", visible=False)
         self.file_extension_label_json = pn.pane.Markdown(".json", visible=False)  # Default to .json; adjust as needed
-        self.file_extension_label_dat = pn.pane.Markdown(".dat", visible=False)  # Default to .json; adjust as needed    
+        self.file_extension_label_dat = pn.pane.Markdown(".dat", visible=False)  # Default to .dat; adjust as needed    
+        self.file_extension_label_csv = pn.pane.Markdown(".csv", visible=False)  # Default to .csv; adjust as needed    
+
         # Setup the FileDownload widget without a file for now
         self.file_download = pn.widgets.FileDownload(filename='', label='Download File', button_type='primary', auto=False, visible=False)
 
         self.upload_settings_button = pn.widgets.FileInput(accept='.json')
 
+        self.debug = pn.widgets.Debugger(name='My Debugger')
+
         # Connecting buttons to their callbacks
         self.save_config_button.on_click(self.set_configuration)
         self.save_dat_button.on_click(self.set_dat_file)
-        self.run_stimulation_button.on_click(self.run_stimulation)
+        self.run_stimulation_button.on_click(self.set_run)
         self.back_button.on_click(self.show_original_finalize_layout)
         self.download_json.on_click(self.download_configuration)
         self.download_dat.on_click(self.download_dat_file)
+        self.start_run.on_click(self.run_stimulation)
         self.upload_settings_button.param.watch(self.load_settings_from_file, 'value')
-
+        
+        #self.debug.param.watch(self.running_program())
         
         self.dynamic_finalize_layout = pn.Column(
-        self.comment_input,
-        self.save_config_button,
-        self.save_dat_button,
-        self.run_stimulation_button,
-        self.upload_settings_button,
-        #self.file_download  # Include the FileDownload widget in the layout
+            self.comment_input,
+            self.save_config_button,
+            self.save_dat_button,
+            self.run_stimulation_button,
+            self.upload_settings_button,
+            #self.file_download  # Include the FileDownload widget in the layout
         )
         self.table = pn.pane.DataFrame(pd.DataFrame())
         self.finalize_tab_layout = pn.Row(self.table, self.dynamic_finalize_layout)
@@ -972,7 +991,15 @@ class DynamicStimGui:
         self.directory_selector.visible = True
         self.download_dat.visible = True
         self.file_extension_label_dat.visible = True
-    
+    def download_csv_file(self,event):
+        selected_directory = self.directory_selector.value[0]  # Assuming the directory is the first selected item
+        filename = f"{self.filename_input.value}.csv"
+        config = self.get_updated_data()
+        df = pd.DataFrame(list(config.items()), columns=['Name', 'Value'])
+        # Exporting the DataFrame to a CSV file
+        csv_path = os.path.join(selected_directory, filename)  # Combine into a full path
+        df.T.to_csv(csv_path, index=False)
+
     def download_configuration(self, event):
         # Save the current configuration to a JSON file
         selected_directory = self.directory_selector.value[0]  # Assuming the directory is the first selected item
@@ -1076,23 +1103,28 @@ class DynamicStimGui:
 
         for widget in watched_widgets:
             widget.param.watch(self.on_any_change, 'value')
-
-    #def download_file(self, event):
-        # Logic to handle file download; specifics depend on your app's structure
-        # For a web app, you might provide a link to the file or use JavaScript for downloading
-        #path_given = self.directory_selector.value[0]
-        #print(path_given)
-        #file_path = os.path.join(path_given, "output.dat")  # Or whatever your file path is
-        #file_url = f"{file_path}"  # Adjust based on how files are served in your environment
-        
-        # Clear the dynamic layout and add a markdown with the download link
-        #self.dynamic_finalize_layout.clear()
-        #download_link = f"[Downloaded {file_url})"
-        #self.dynamic_finalize_layout.append(pn.pane.Markdown(download_link))
-
+    def set_run(self, event):
+        self.dynamic_finalize_layout.clear()
+        self.dynamic_finalize_layout.extend([
+            pn.pane.Markdown('You are almost there! Set the file location for your .csv file.'),
+            self.back_button,
+            pn.Row(self.filename_input,self.file_extension_label_csv),
+            self.directory_selector,
+            self.start_run
+        ])
+        self.back_button.visible = True
+        self.directory_selector.visible = True
+        self.start_run.visible = True
+        self.filename_input.visible = True
+        self.file_extension_label_csv.visible = True
     def run_stimulation(self, event):
-        self.controller.start_stimulation()  # Assuming start_stimulation is implemented
+        self._update_visibility_and_content()
+        self.download_csv_file(None)
+        self.running_program(None)
         self.update_table_data(None)  # Update any GUI components as necessary after starting the stimulation
+        self.controller.start_stimulation()  # Assuming start_stimulation is implemented
+
+        
 
     def update_table_data(self, event):
         # Initialize data collection
@@ -1173,13 +1205,19 @@ class DynamicStimGui:
         self._update_visibility_and_content()
         self.update_table_data(None)
 
-
-
-    def show(self):
-        return self.tabs
+    def running_program(self, event=None):
+        self.dynamic_finalize_layout.clear()
+        self.dynamic_finalize_layout.extend([
+            pn.pane.Markdown('You are almost there! Set the file location for your .csv file.'),
+            self.back_button,
+            self.debugger
+        ])
+        self.back_button.visible = True
+        self.debugger.visible = True
+        logger.debug("This is a test debug message.")
 
 # To use the class and display the GUI in a notebook or as a Panel app
-stim_gui = DynamicStimGui()
-controller = STGDeviceController(stim_gui)
+stim_gui = DynamicStimGui(logger=logger)
+controller = STGDeviceController(stim_gui, logger=logger)
 stim_gui.controller = controller
 stim_gui.show().servable().show('Stimulation Gui')
