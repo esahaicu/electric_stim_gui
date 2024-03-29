@@ -14,44 +14,192 @@ import pendulum
 import time
 import os
 import json
+import clr
+from typing import Tuple, List
 
+from System import Action
+from System import *
 
-# import clr
+#change this path to the McsUsbNet for your computer
+clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
 
-# from System import Action
-# from System import *
+from Mcs.Usb import CMcsUsbListNet
+from Mcs.Usb import DeviceEnumNet
 
-# #change this path to the McsUsbNet for your computer
-# clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+from Mcs.Usb import CStg200xDownloadNet
+from Mcs.Usb import McsBusTypeEnumNet
+from Mcs.Usb import STG_DestinationEnumNet
 
-# from Mcs.Usb import CMcsUsbListNet
-# from Mcs.Usb import DeviceEnumNet
-
-# from Mcs.Usb import CStg200xDownloadNet
-# from Mcs.Usb import McsBusTypeEnumNet
-# from Mcs.Usb import STG_DestinationEnumNet
+import math
+from System import Array, UInt32, Int32, UInt64
 
 class STGDeviceController:
     def __init__(self, gui_instance):
         self.gui = gui_instance
+        self.stim_amplitude_arr = []
+        self.stim_duration_arr = []
+        self.sync_amplitude_arr = []
+        self.sync_duration_arr = []
+
     def channel_data(self):
-        waveform = self.gui.waveform_group.value
-        amplitude = self.gui.amplitude_slider.value
-        pulse_duration = self.gui.pulse_duration_slider.value
-        frequency = self.gui.period_frequency_value_input.value if self.gui.period_frequency_group == 'Frequency' else 1/self.gui.period_frequency_value_input.value
-        events = self.gui.number_of_events_input.value
-        duration_between_events = self.gui.duration_between_events_slider.value
-        total_trains = self.gui.number_of_trains_input.value
-        time_between_trains = self.gui.train_duration_slider.value
-        external_signal_dur = self.gui.external_trigger_duration.value
-        return [waveform, amplitude, pulse_duration, frequency, events, duration_between_events, total_trains, time_between_trains, external_signal_dur]
-        # Additional initializations as necessary
-    def dat_data(self):
-        waveform, amplitude, pulse_duration, frequency, events, duration_between_events, total_trains, time_between_trains, external_signal_dur = self.channel_data()
-        #channels_data = {1: [], 2:[], 3: [], 4: [], 5: [], 6:[], 7: [], 8: [], 9: [], 10:[], 11: [], 12: [], 13: [], 14:[], 15: [], 16: []}
+        config = self.gui.get_updated_data()
+        config["amplitude_microamps"] = self.convert_to_micro(config["amplitude"], config["amplitude_unit"])
+        config["pulse_duration_microseconds"] = self.convert_to_micro(config["pulse_duration"], config["pulse_duration_unit"])
+        config["duration_between_events_microseconds"] = self.convert_to_micro(config["duration_between_events"], config["duration_between_events_unit"])
+        config["time_between_trains_microseconds"] = self.convert_to_micro(config["train_duration"], config["train_duration_unit"])
+        config["external_signal_dur_microseconds"] = self.convert_to_micro(config["external_trigger_duration"], config["external_trigger_duration_unit"])
+        if config["period_frequency_type"] == 'Frequency':
+            period_seconds = 1 / config["period_frequency_value"] if config["period_frequency_value"] else float('inf')
+            config["period_microseconds"] = self.convert_to_micro(period_seconds, 's')
+        else:
+            config["period_microseconds"] = self.convert_to_micro(config["period_frequency_value"], 's')
+        return config
+
+    def convert_to_micro(self, value, unit_type):
+        unit_conversion_factors = {
+            'us': 1, 'ms': 1000, 's': 1000000,
+            'uA': 1, 'mA': 1000, 'A': 1000000,
+            'uV': 0.001, 'mV': 1, 'V': 1000,
+        }
+        return value * unit_conversion_factors.get(unit_type, 1)
+
+    def generate_stimulation_and_sync_data(self):
+        config = self.channel_data()
+        self.stim_amplitude_arr.clear()
+        self.stim_duration_arr.clear()
+        self.sync_amplitude_arr.clear()
+        self.sync_duration_arr.clear()
+
+        cumulative_duration = 0
+        train_duration = 0  # Initialize train duration
+
+        for train in range(config["total_trains"]):
+            self.sync_amplitude_arr.append(1)
+            self.sync_duration_arr.append(config["external_signal_dur_microseconds"])
+            cumulative_duration += config["pulse_duration_microseconds"]
+            train_duration += config["pulse_duration_microseconds"]
+            for event in range(config["number_of_events"]):
+                if config["waveform"] == "Monophasic":
+                    self.stim_amplitude_arr.append(config["amplitude_microamps"])
+                    self.stim_duration_arr.append(config["pulse_duration_microseconds"])
+                    if event < config["number_of_events"] - 1:
+                        self.add_delay(config["duration_between_events_microseconds"])
+                        cumulative_duration += config["duration_between_events_microseconds"] + config["pulse_duration_microseconds"]
+                        train_duration += config["duration_between_events_microseconds"]
+                if config["waveform"] == "Biphasic":
+                    self.stim_amplitude_arr.append(config["amplitude_microamps"])
+                    self.stim_duration_arr.append(config["pulse_duration_microseconds"])
+                    self.stim_amplitude_arr.append(-config["amplitude_microamps"])
+                    self.stim_duration_arr.append(config["pulse_duration_microseconds"])
+                    if event < config["number_of_events"] - 1:
+                        self.add_delay(config["duration_between_events_microseconds"])
+                        cumulative_duration += config["duration_between_events_microseconds"] + 2*config["pulse_duration_microseconds"]
+                        train_duration += config["duration_between_events_microseconds"]
+
+            if train < config["total_trains"] - 1:
+                next_train_start = cumulative_duration + config["time_between_trains_microseconds"]
+                if config["waveform"] == "Monophasic":
+                    inter_train_delay = config["time_between_trains_microseconds"] - (config["number_of_events"]*config["pulse_duration_microseconds"]+(config["number_of_events"]-1)*config["duration_between_events_microseconds"])
+                if config["waveform"] == "Biphasic":
+                    inter_train_delay = config["time_between_trains_microseconds"] - (config["number_of_events"]*config["pulse_duration_microseconds"]*2+(config["number_of_events"]-1)*config["duration_between_events_microseconds"])
+
+                sync_inter_train_delay = config["time_between_trains_microseconds"] - config["external_signal_dur_microseconds"]
+                if inter_train_delay > 0:
+                # Append a delay at the end of each train to match the time until the next train starts
+                    self.add_delay(inter_train_delay)
+                cumulative_duration += sync_inter_train_delay
+                self.sync_amplitude_arr.append(0)  # Sync signal low to mark inter-train delay
+                self.sync_duration_arr.append(sync_inter_train_delay)
+
+    def add_waveform_event(self, waveform, amplitude, pulse_duration):
+        if waveform == "Monophasic":
+            self.stim_amplitude_arr.append(amplitude)
+            self.stim_duration_arr.append(pulse_duration)
+        elif waveform == "Biphasic":
+            self.stim_amplitude_arr.append(amplitude)
+            self.stim_duration_arr.append(pulse_duration)
+            self.stim_amplitude_arr.append(-amplitude)
+            self.stim_duration_arr.append(pulse_duration)
+        elif waveform == "Sinusoidal":
+            self.stim_amplitude_arr.append(amplitude)
+            self.stim_duration_arr.append(pulse_duration)#(1000 / self.frequency)
+
+    def add_delay(self, delay_duration):
+        self.stim_amplitude_arr.append(0)
+        self.stim_duration_arr.append(delay_duration)
+    @staticmethod
+    def prepare_device_data(amplitude_arr, duration_arr):
+        encoded_amplitude = []
+        for amp in amplitude_arr:
+            magnitude = abs(amp) & 0xFFF
+            if amp < 0:
+                # Set sign bit for negative amplitudes
+                encoded_value = (1 << 15) | magnitude
+            else:
+                # Positive amplitudes directly
+                encoded_value = (0 << 7) | magnitude
+
+            # Convert encoded_value to int for formatting purposes
+            formatted_value = (encoded_value)
+            print(f"Encoded: {formatted_value} | Binary: {formatted_value:016b}")
+            encoded_amplitude.append(encoded_value)
+
+        pData = Array[UInt16](UInt16(d) for d in encoded_amplitude)
+        tData = Array[UInt64]([UInt64(int(d)) for d in duration_arr])
+        return pData, tData
+    def configure_device_and_send_data(self, device):
+        # Generate stimulation and synchronization data based on input parameters
+        config = self.channel_data()
+        self.generate_stimulation_and_sync_data()
+        #print(self.stim_amplitude_arr)
+        #print(self.stim_duration_arr)
+        #print(self.sync_amplitude_arr)
+        #print(self.sync_duration_arr)
+
+        # Prepare the data with the correct arrays directly using the static method
+        pData, tData = self.prepare_device_data(self.stim_amplitude_arr, self.stim_duration_arr)
+        sync_pData = Array[UInt16]([UInt16(v) for v in self.sync_amplitude_arr])
+        sync_tData = Array[UInt64]([UInt64(int(d)) for d in self.sync_duration_arr])
+
+        # Configure the device mode based on modulation type
+        if config["modulation_type_group"].lower() == 'current':
+            device.SetCurrentMode()
+        else:
+            device.SetVoltageMode()
+        # Setup triggers, assuming the device supports configuring multiple triggers
+        trigger_inputs = device.GetNumberOfTriggerInputs()
+        channelmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Activate the first channel
+        syncoutmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Sync signal for synchronization
+        repeat = Array[UInt32]([0] * trigger_inputs)  # Infinite repeat for simplicity
+        print(channelmap)
+        device.SetupTrigger(UInt32(0), channelmap, syncoutmap, repeat)
+
+        # Clear any previous data on the channel and sync output
+        device.ClearChannelData(UInt32(0))
+        device.ClearSyncData(UInt32(0))
+
+        # Send stimulation data to the device
+        device.SendChannelData(UInt32(0), pData, tData)
+
+        # For synchronization signal, assuming simple on/off logic
+        print(sync_pData)
+        device.SendSyncData(UInt32(0), sync_pData, sync_tData)
+
+        # Start the stimulation based on the trigger configuration
+        device.SendStart(UInt32(1))
+
+        print("Stimulation started. Please wait for completion...")
         
-        channels_data = {channel: [] for channel in range(1, 17)}
-    
+        # Wait for stimulation to complete based on the duration (simplified)
+        total_duration = (sum(self.stim_duration_arr)/1000000) #+ 0.00001  # Convert µs to seconds
+        time.sleep(total_duration)
+        device.SendStop(1)
+        print("Stimulation completed. Disconnecting from device.")
+        device.Disconnect()
+
+    def dat_data(self):
+        config = self.channel_data()
+        channels_data = {channel: [] for channel in range(1, 17)}    
         # Helper function to add pulse data
         def add_pulse_data(channel, pulse, value1, value2, duration):
             channels_data[channel].append({
@@ -67,37 +215,38 @@ class STGDeviceController:
         add_pulse_data(10, 0, 0.000, 1.000, 5000)  # Initial 5000 time unit on signal for channel 3
         add_pulse_data(10, 0, 0.000, 0.000, 50)    # Followed by 50 time unit off signal for channel 3
         
-        for train in range(total_trains):
-            for event in range(events):
+        for train in range(config["total_trains"]):
+            for event in range(config["number_of_events"]):
                 # Assign waveform-specific values and add pulse data
-                if waveform == "Monophasic":
-                    total_time = events * (pulse_duration + duration_between_events)
-                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
-                    add_pulse_data(1, 0, 0, 0, duration_between_events)
-                    if event == events - 1:  # Add rest time at the end of each train, except after the last event
-                        add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
-                elif waveform == "Biphasic":
-                    total_time = events * (2 * pulse_duration + duration_between_events)
+                if config["waveform"] == "Monophasic":
+                    total_time = config["number_of_events"] * (config["pulse_duration_microseconds"] + config["duration_between_events_microseconds"])
+                    add_pulse_data(1, 0, 0, config["amplitude_microamps"], config["pulse_duration_microseconds"])
+                    add_pulse_data(1, 0, 0, 0, config["duration_between_events_microseconds"])
+                    if event == config["number_of_events"] - 1:  # Add rest time at the end of each train, except after the last event
+                        add_pulse_data(1, 0, 0, 0, config["time_between_trains_microseconds"] - total_time)
+                elif config["waveform"] == "Biphasic":
+                    total_time = config["number_of_events"] * (2 * config["pulse_duration_microseconds"] + config["duration_between_events_microseconds"])
                     # Biphasic waveform: first phase amplitude, then negative phase
-                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
-                    add_pulse_data(1, 0, 0, -amplitude, pulse_duration)
-                    add_pulse_data(1, 0, 0, 0, duration_between_events)
-                    if event == events - 1:
-                        add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
-                elif waveform == "Sinusoidal":
-                    total_time = events * (1/frequency + duration_between_events)
+                    add_pulse_data(1, 0, 0, config["amplitude_microamps"], config["pulse_duration_microseconds"])
+                    add_pulse_data(1, 0, 0, -config["amplitude_microamps"], config["pulse_duration_microseconds"])
+                    add_pulse_data(1, 0, 0, 0, config["duration_between_events_microseconds"])
+                    if event == config["number_of_events"] - 1:
+                        add_pulse_data(1, 0, 0, 0, config["time_between_trains_microseconds"] - total_time)
+                elif config["waveform"] == "Sinusoidal":
+                    total_time = config["number_of_events"] * (config["period_microseconds"] + config["duration_between_events_microseconds"])
                     # For simplicity, assuming each event in a sinusoidal train lasts for 'pulse_duration'
-                    add_pulse_data(1, 0, 0, amplitude, pulse_duration)
-                    add_pulse_data(1, 0, 0, 0, duration_between_events)
-                    if event == events - 1:
-                        add_pulse_data(1, 0, 0, 0, time_between_trains - total_time)
+                    add_pulse_data(1, 0, 0, config["amplitude_microamps"], config["pulse_duration_microseconds"])
+                    add_pulse_data(1, 0, 0, 0, config["duration_between_events_microseconds"])
+                    if event == config["number_of_events"] - 1:
+                        add_pulse_data(1, 0, 0, 0, config["time_between_trains_microseconds"] - total_time)
 
         # Process external signal duration and delay from stimulus for relevant channels
-            add_pulse_data(9, 0, 0, 1.000, external_signal_dur)
-            add_pulse_data(9, 0, 0, 0.000, time_between_trains-external_signal_dur)  # Example for external signal duration
+            add_pulse_data(9, 0, 0, 1.000, config["external_trigger_duration"])
+            add_pulse_data(9, 0, 0, 0.000, config["time_between_trains_microseconds"]-config["external_trigger_duration"])  # Example for external signal duration
         return channels_data
 
     def create_dat_file(self, file_path, dat_data):
+        config = self.channel_data()
         with open(file_path, 'w') as file:
             # Write header information
             file.write("Multi Channel Systems MC_Stimulus II\n")
@@ -113,6 +262,22 @@ class STGDeviceController:
                 for row in data:
                     file.write(f"{row['pulse']}\t{row['value1']}\t{row['value2']}\t{row['time']}\n")
                 file.write("\n")  # Add an empty line after each channel's data
+    
+    def start_stimulation(self):
+        def PollHandler(status, stgStatusNet, index_list):
+            print('%x %s' % (status, str(stgStatusNet.TiggerStatus[0])))
+
+        deviceList = CMcsUsbListNet(DeviceEnumNet.MCS_DEVICE_USB)
+        if deviceList.Count == 0:
+            print("No devices found")
+            return
+
+        device = CStg200xDownloadNet()
+        device.Stg200xPollStatusEvent += PollHandler
+        device.Connect(deviceList.GetUsbListEntry(0))
+
+        self.configure_device_and_send_data(device)
+
 
 class DynamicStimGui:
     def __init__(self):
@@ -732,6 +897,11 @@ class DynamicStimGui:
         self.channel_select_widgets[anode_channel].value = 'Anode'
 
 
+
+
+
+
+
     def _setup_finalize_tab(self):
         self.comment_input = pn.widgets.TextInput(name="Comments", placeholder="Add any comment here...")
         self.save_config_button = pn.widgets.Button(name="Save Configuration", button_type="primary")
@@ -843,6 +1013,30 @@ class DynamicStimGui:
         # Show the UI elements for downloading the saved configuration
         self.show_original_finalize_layout()
         #self.switch_to_file_save_ui('Configuration saved. Ready to download.')
+    def get_updated_data(self):
+        config = {
+            "waveform": self.waveform_group.value,
+            "modulation_type_group": self.modulation_type_group.value,
+            "amplitude": self.amplitude_slider.value,
+            "pulse_duration": self.pulse_duration_slider.value,
+            "number_of_events": self.number_of_events_input.value,
+            "duration_between_events": self.duration_between_events_slider.value,
+            "period_frequency_type": self.period_frequency_group.value,  # 'Period' or 'Frequency'
+            "period_frequency_value": self.period_frequency_value_input.value,
+            "total_trains": self.number_of_trains_input.value,
+            "train_duration": self.train_duration_slider.value,
+            "accept_external_trigger": self.accept_external_trigger.value,
+            "external_trigger_duration": self.external_trigger_duration.value,
+            # Add amplitude, pulse_duration, and duration units if you need them
+            "amplitude_unit": self.amplitude_unit_selector.value,
+            "pulse_duration_unit": self.pulse_duration_unit_selector.value,
+            "duration_between_events_unit": self.duration_between_events_unit_selector.value,
+            "train_duration_unit": self.train_duration_unit_selector.value,
+            "external_trigger_duration_unit": self.external_trigger_duration_unit_selector.value,
+            # Channel configurations
+            "channel_configurations": {f"Channel {i+1}": widget.value for i, widget in enumerate(self.channel_select_widgets)}
+        }
+        return config
 
     def download_dat_file(self, event):
         selected_directory = self.directory_selector.value[0]  # Assuming the directory is the first selected item
@@ -852,7 +1046,7 @@ class DynamicStimGui:
         # Generate .dat file content
         channels_data = self.controller.dat_data()
         self.controller.create_dat_file(file_path, channels_data)
-        print(file_path, channels_data)
+        #print(file_path, channels_data)
         self.show_original_finalize_layout()
 
     def show_original_finalize_layout(self, event=None):
@@ -897,14 +1091,14 @@ class DynamicStimGui:
         #self.dynamic_finalize_layout.append(pn.pane.Markdown(download_link))
 
     def run_stimulation(self, event):
-        # Your existing logic for running stimulation
-        self.update_table_data(None)
+        self.controller.start_stimulation()  # Assuming start_stimulation is implemented
+        self.update_table_data(None)  # Update any GUI components as necessary after starting the stimulation
 
     def update_table_data(self, event):
         # Initialize data collection
         total_event_duration_in_us = self._calculate_total_event_duration()
         recommended_unit, converted_duration = self._convert_duration_and_unit(total_event_duration_in_us)
-        
+
         # Update the data dictionary with calculated values
         data = {
             "Parameter": [
