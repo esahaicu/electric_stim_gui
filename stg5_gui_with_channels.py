@@ -34,10 +34,32 @@ from Mcs.Usb import STG_DestinationEnumNet
 import math
 from System import Array, UInt32, Int32, UInt64
 
+import serial
+import serial.tools.list_ports
+
 import logging
 pn.extension('terminal', console_output='disable')
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("my_app_logger")
+class BRAINSBoard:
+    def __init__(self, gui_instance, logger):
+        self.gui = gui_instance
+        self.logger = logger
+    def connect(self, port):
+        self.baud_rate = 115200 
+        self.arduino = serial.Serial(port, self.baud_rate, timeout=1)
+    def precise_sleep(self, delay):
+        target = time.perf_counter_ns() + delay * 1000000
+        while time.perf_counter_ns() < target:
+            pass
+
+    def send_command(self, command, delay=0):
+        """Send a command to the Arduino and wait for a specified delay."""
+        self.logger.debug(command)
+        self.arduino.write(command.encode())
+        self.precise_sleep(delay)
+    def close(self):
+        self.arduino.close()
 
 
 class STGDeviceController:
@@ -119,19 +141,6 @@ class STGDeviceController:
                 self.sync_amplitude_arr.append(0)  # Sync signal low to mark inter-train delay
                 self.sync_duration_arr.append(sync_inter_train_delay)
 
-    def add_waveform_event(self, waveform, amplitude, pulse_duration):
-        if waveform == "Monophasic":
-            self.stim_amplitude_arr.append(amplitude)
-            self.stim_duration_arr.append(pulse_duration)
-        elif waveform == "Biphasic":
-            self.stim_amplitude_arr.append(amplitude)
-            self.stim_duration_arr.append(pulse_duration)
-            self.stim_amplitude_arr.append(-amplitude)
-            self.stim_duration_arr.append(pulse_duration)
-        elif waveform == "Sinusoidal":
-            self.stim_amplitude_arr.append(amplitude)
-            self.stim_duration_arr.append(pulse_duration)#(1000 / self.frequency)
-
     def add_delay(self, delay_duration):
         self.stim_amplitude_arr.append(0)
         self.stim_duration_arr.append(delay_duration)
@@ -163,11 +172,6 @@ class STGDeviceController:
         # Generate stimulation and synchronization data based on input parameters
         config = self.channel_data()
         self.generate_stimulation_and_sync_data()
-        #print(self.stim_amplitude_arr)
-        #print(self.stim_duration_arr)
-        #print(self.sync_amplitude_arr)
-        #print(self.sync_duration_arr)
-
         # Prepare the data with the correct arrays directly using the static method
         pData, tData = self.prepare_device_data(self.stim_amplitude_arr, self.stim_duration_arr)
         sync_pData = Array[UInt16]([UInt16(v) for v in self.sync_amplitude_arr])
@@ -309,6 +313,8 @@ class DynamicStimGui:
         self._connect_callbacks()
         self._setup_finalize_tab()
         self._setup_logging_and_debugger()
+        self.final_tab_active = False
+        self.graph_tab_active = False
 
         #self.upload_old_settings_button = pn.widgets.FileInput(accept='.json', name='Upload Old Settings')
 
@@ -401,6 +407,11 @@ class DynamicStimGui:
             self.channel_select_widgets.append(radio_button_group)  # Store the widget for later reference
 
         self.random_ca_button = pn.widgets.Button(name="Random Cathode/Anode", button_type="success")
+        self.serial_ports = self.get_serial_ports()
+        self.port_selector = pn.widgets.Select(name='Select Serial Port:', options=self.serial_ports)
+
+        # Text area for showing selected port's info
+        self.port_selector_text = pn.pane.Markdown("Selected Port Info will appear here.")
 
 
         ### SELECTION PANE
@@ -471,6 +482,8 @@ class DynamicStimGui:
         for i, widget in enumerate(self.channel_select_widgets, start=1):
             self.channel_select_layout.append(pn.Row(pn.pane.Markdown(f"**Channel {i}:**"), widget))
         self.channel_select_layout.append(self.random_ca_button)
+        self.channel_select_layout.append(self.port_selector)
+        self.channel_select_layout.append(self.port_selector_text)
 
         # Combine into tabs
         self.tabs = pn.Tabs(
@@ -506,7 +519,7 @@ class DynamicStimGui:
         self.pulse_duration_range_slider.param.watch(lambda event: self._update_range('pulse_duration', event.new), 'value')
         self.period_frequency_range_slider.param.watch(lambda event: self._update_range('period_frequency', event.new), 'value')
         self.duration_between_events_range_slider.param.watch(lambda event: self._update_range('duration_between_events', event.new), 'value')
-
+        self.set_to_pulse_duration.param.watch(lambda event: self._on_event_settings_changed, 'value')
 
         #Train Settings
         self.number_of_trains_input.param.watch(self._update_train_settings, 'value')
@@ -523,45 +536,34 @@ class DynamicStimGui:
 
         #External Trigger Settings
         self.randomize_external_trigger.on_click(self._randomize_external_trigger)
-        self.set_to_pulse_duration.on_click(self._on_event_settings_changed)
         #self.external_trigger_duration_unit_selector.param.watch(self._on_event_settings_changed, 'value')
         self.external_trigger_duration_range_slider.param.watch(lambda event: self._randomize_external_trigger_duration_range(event.new), 'value')
 
         # Ensure updates based on event settings changes
-        self.amplitude_slider.param.watch(lambda event: self._update_time_based_on_event_settings(), 'value')
+        #self.amplitude_slider.param.watch(lambda event: self._update_time_based_on_event_settings(), 'value')
         self.pulse_duration_slider.param.watch(self._on_event_settings_changed, 'value')
         self.duration_between_events_slider.param.watch(self._on_event_settings_changed, 'value')
         self.number_of_events_input.param.watch(self._on_event_settings_changed, 'value')
-        #self.pulse_duration_unit_selector.watch(self._on_event_settings_changed, 'value')
-        #self.duration_between_events_unit_selector.watch(self._on_event_settings_changed, 'value')
+        self.tabs.param.watch(self._on_graph_tab_active, 'active')
 
+
+        self.port_selector.param.watch(self.show_port_info, 'value')
+
+    def _on_graph_tab_active(self, event):
+        # Check if the "Projected Graphs" tab is currently active
+        if self.tabs.active == 3:
+            # Call the update functions for the projected graphs
+            self.graph_tab_active = True
+            self.on_any_change(None)  # Assuming this function is correctly defined elsewhere
+            self.update_projected_graphs()  # Assuming this function is correctly defined elsewhere
+        else:
+            self.graph_tab_active = False
     def _on_event_settings_changed(self, event):
-        self._update_external_trigger_settings_based_on_event_duration()
-
-        #GRAPHING
-        self.amplitude_slider.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.waveform_group.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.number_of_events_input.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.period_frequency_group.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.period_frequency_value_input.param.watch(lambda event: self.update_projected_graphs(), 'value')
-
-        self.number_of_trains_input.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.train_duration_slider.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        
-        self.accept_external_trigger.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.external_trigger_duration.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        
-
-        #   selectors
-        self.amplitude_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.period_frequency_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.duration_between_events_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.train_duration_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
-        self.external_trigger_duration_unit_selector.param.watch(lambda event: self.update_projected_graphs(), 'value')
-
+        #self._update_external_trigger_settings_based_on_event_duration()
 
         ### Channel Setting
         self.random_ca_button.on_click(self.randomize_cathode_anode)
+        self.set_to_pulse_duration.on_click(self._update_external_trigger_settings_based_on_event_duration)
 
 
     def _update_visibility_and_content(self, event=None):
@@ -664,10 +666,13 @@ class DynamicStimGui:
         self.external_trigger_duration.value = np.random.randint(0, max_duration + 1)
     
     def _calculate_total_event_duration(self):
+        
         # Assuming the pulse_duration_slider value is in the unit selected in pulse_duration_unit_selector
         unit_multiplier = {'us': 1, 'ms': 1000, 's': 1000000}
-        pulse_duration_in_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
-        
+        if self.waveform_group.value == 'Monophasic':
+            pulse_duration_in_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
+        elif self.waveform_group.value == 'Biphasic':
+            pulse_duration_in_us = 2 * self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
         # Same for duration between events
         duration_between_events_in_us = self.duration_between_events_slider.value * unit_multiplier[self.duration_between_events_unit_selector.value]
         
@@ -683,23 +688,24 @@ class DynamicStimGui:
         else:
             return 'us', duration_microseconds
 
-    def _update_external_trigger_settings_based_on_event_duration(self):
+    def _update_external_trigger_settings_based_on_event_duration(self, event):
+        #self.on_any_change(event)
         total_event_duration_in_us = self._calculate_total_event_duration()
         recommended_unit, converted_duration = self._convert_duration_and_unit(total_event_duration_in_us)
-        
+        print(recommended_unit, converted_duration)
         # Update the external trigger duration unit selector and value
         self.external_trigger_duration_unit_selector.value = recommended_unit
         self.external_trigger_duration.value = converted_duration
-    def _update_time_based_on_event_settings(self):
-        # Example of calculating total event duration and deciding the unit
-        total_duration = self._calculate_total_event_duration()
-        recommended_unit, converted_duration = self._convert_duration_and_unit(total_duration)
+    # def _update_time_based_on_event_settings(self):
+    #     # Example of calculating total event duration and deciding the unit
+    #     total_duration = self._calculate_total_event_duration()
+    #     recommended_unit, converted_duration = self._convert_duration_and_unit(total_duration)
 
-        # Update external trigger duration and unit based on calculations
-        self.external_trigger_duration_unit_selector.value = recommended_unit
-        self.external_trigger_duration.value = converted_duration
+    #     # Update external trigger duration and unit based on calculations
+    #     self.external_trigger_duration_unit_selector.value = recommended_unit
+    #     self.external_trigger_duration.value = converted_duration
 
-        # You might need a similar method for updating train settings
+    #     # You might need a similar method for updating train settings
 
     def _convert_duration_and_unit(self, duration_microseconds):
         if duration_microseconds >= 1_000_000:  # More than 1 second
@@ -720,12 +726,18 @@ class DynamicStimGui:
     
     #GRAPHING
     def update_projected_graphs(self):
+        if not self.graph_tab_active:
+        # If the tab is not active, skip the update
+            return
         unit_multiplier = {'us': 1, 'ms': 1000, 's': 1000000}
         unit_multiplier_volt = {'uV': 1, 'mV': 1000, 'V': 1000000}
         unit_multiplier_amp = {'uA': 1, 'mA': 1000, 'A': 1000000}
         
         # Calculate necessary values
-        pulse_duration_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
+        if self.waveform_group == 'Biphasic':
+            pulse_duration_us = 2 * self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
+        else:
+            pulse_duration_us = self.pulse_duration_slider.value * unit_multiplier[self.pulse_duration_unit_selector.value]
         duration_between_events_us = self.duration_between_events_slider.value * unit_multiplier[self.duration_between_events_unit_selector.value]
         trigger_duration_us = self.external_trigger_duration.value * unit_multiplier[self.external_trigger_duration_unit_selector.value]
         
@@ -784,10 +796,10 @@ class DynamicStimGui:
                 end_time = start_time + duration_between_events
                 pulse[(time >= start_time) & (time < end_time)] = amplitude
             elif waveform_type == 'Biphasic':
-                start_time = i * (2*pulse_duration + duration_between_events)
-                end_time = start_time + 2*pulse_duration
-                pulse[(time >= start_time) & (time < start_time + pulse_duration)] = amplitude
-                pulse[(time >= start_time + pulse_duration) & (time < end_time)] = -amplitude
+                start_time = i * (pulse_duration + duration_between_events)
+                end_time = start_time + pulse_duration
+                pulse[(time >= start_time) & (time < start_time + pulse_duration/2)] = amplitude
+                pulse[(time >= start_time + pulse_duration/2) & (time < end_time)] = -amplitude
             else:
                 break
 
@@ -863,7 +875,7 @@ class DynamicStimGui:
             # Total simulation time includes all trains and delays between them
             total_simulation_duration = number_of_trains * single_train_duration + (number_of_trains - 1) * delay_between_trains
             
-            time = np.linspace(0, total_simulation_duration, 10000 * number_of_trains)
+            time = np.linspace(0, total_simulation_duration, 100000 * number_of_trains)
             pulse = np.zeros_like(time)
 
             for n in range(number_of_trains):
@@ -876,9 +888,9 @@ class DynamicStimGui:
                         pulse[(time >= event_start_time) & (time < event_end_time)] = amplitude
                     elif waveform_type == 'Biphasic':
                         event_start_time = train_start_time + i * (pulse_duration + duration_between_events)
-                        event_end_time = event_start_time + 2* pulse_duration
-                        pulse[(time >= event_start_time) & (time < event_start_time + pulse_duration)] = amplitude
-                        pulse[(time >= event_start_time + pulse_duration) & (time < event_end_time)] = -amplitude            
+                        event_end_time = event_start_time + pulse_duration
+                        pulse[(time >= event_start_time) & (time < event_start_time + pulse_duration/2)] = amplitude
+                        pulse[(time >= event_start_time + pulse_duration/2) & (time < event_end_time)] = -amplitude            
             # Assuming the trigger starts with the first event of each train and lasts for 'trigger_duration'
                 trigger = np.zeros_like(time)
                 for n in range(number_of_trains):
@@ -904,7 +916,7 @@ class DynamicStimGui:
         if waveform_type == 'Monophasic':
             return (pulse_duration + duration_between_events) * number_of_events 
         elif waveform_type == 'Biphasic':
-            return (2 * pulse_duration + duration_between_events)  * number_of_events   # Considering both phases
+            return (pulse_duration + duration_between_events)  * number_of_events   # Considering both phases
         elif waveform_type == 'Sinusoidal':
             # Assuming 'pulse_duration' represents one full cycle of the sine wave
             return (pulse_duration + duration_between_events)  * number_of_events
@@ -926,6 +938,20 @@ class DynamicStimGui:
         self.channel_select_widgets[cathode_channel].value = 'Cathode'
         self.channel_select_widgets[anode_channel].value = 'Anode'
 
+    def get_serial_ports(self):
+        """Returns a list of serial ports (COM ports) available on the system."""
+        ports = serial.tools.list_ports.comports()
+        port_list = [port.device for port in ports]  # Extracts port names
+        return port_list
+
+    # Function to display selected port's details
+    def show_port_info(self, event):
+        selected_port = event.new
+        ports = serial.tools.list_ports.comports()
+        for port in ports:
+            if port.device == selected_port:
+                self.port_selector_text.text = f"Selected Port:\n{port}\nDescription: {port.description}"
+                break
 
 
 
@@ -963,6 +989,7 @@ class DynamicStimGui:
         self.download_dat.on_click(self.download_dat_file)
         self.start_run.on_click(self.run_stimulation)
         self.upload_settings_button.param.watch(self.load_settings_from_file, 'value')
+        self.comment_input.param.watch(lambda event: self.comment_added(event.new), 'value')
         #self.debug.param.watch(self.running_program())
         
         self.dynamic_finalize_layout = pn.Column(
@@ -976,9 +1003,20 @@ class DynamicStimGui:
         self.table = pn.pane.DataFrame(pd.DataFrame())
         self.finalize_tab_layout = pn.Row(self.table, self.dynamic_finalize_layout)
         #self.update_table_data(None)
-        self.on_any_change(None)
+        self.tabs.param.watch(self._on_final_tab_active, 'active')
         self.tabs.append(('Finalize', self.finalize_tab_layout))        
-        
+
+    def _on_final_tab_active(self, event):
+        # Check if the "Projected Graphs" tab is currently active
+        if self.tabs.active == 5:
+            self.final_tab_active = True
+            # Call the update functions for the projected graphs
+            #self.on_any_change(None)  # Assuming this function is correctly defined elsewhere
+            self.update_table_data(None)  # Assuming this function is correctly defined elsewhere
+            
+        else:
+            self.final_tab_active = False
+
     def set_configuration(self, event):
         self.dynamic_finalize_layout.clear()
         self.dynamic_finalize_layout.extend([
@@ -1107,19 +1145,53 @@ class DynamicStimGui:
         self.download_json.visible = False
         self.download_dat.visible = False
     def on_any_change(self, event):
-        self.update_table_data(None)
-
+        #self.update_table_data(None)
+        #self.update_projected_graphs()
         # Example of connecting widgets to the on_any_change method
         watched_widgets = [
             self.waveform_group, self.modulation_type_group, self.amplitude_slider, 
-            self.pulse_duration_slider, self.number_of_events_input, self.duration_between_events_slider,
+            self.pulse_duration_slider, self.pulse_duration_unit_selector, self.number_of_events_input,
+            self.duration_between_events_slider, self.duration_between_events_unit_selector,
             self.period_frequency_group, self.period_frequency_value_input, self.number_of_trains_input,
             self.train_duration_slider, self.accept_external_trigger, self.external_trigger_duration,
+            self.external_trigger_duration_unit_selector, self.comment_input,
             # Include any other widgets that affect the table data
         ]
 
         for widget in watched_widgets:
             widget.param.watch(self.on_any_change, 'value')
+    def setup_bb_map(self):
+        widget_vals = {(i, widget.value) for i, widget in enumerate(self.channel_select_widgets)}
+        sorted_widget_vals = sorted(list(widget_vals))
+
+        # Define the mapping for the values
+        value_map = {
+            'Floating': 'F',
+            'Ground': 'G',
+            'Cathode': 'C',
+            'Anode': 'A'
+        }
+
+        # Initialize an empty list to store the mapped values
+        mapped_values = []
+
+        # Iterate through the sorted widget values and apply the mapping
+        for index, value in sorted_widget_vals:
+            mapped_values.append(value_map[value])
+
+        # Convert the mapped values list to a string and format it as requested
+        formatted_output_with_index = "["
+
+        # Iterate through the sorted widget values and include the index in hexadecimal format followed by its mapped value
+        for index, value in sorted_widget_vals:
+            formatted_output_with_index += f"{index:X}{value_map[value]}"
+
+        # Close the formatted string
+        formatted_output_with_index += "]"
+
+        return formatted_output_with_index
+
+
     def set_run(self, event):
         self.dynamic_finalize_layout.clear()
         self.dynamic_finalize_layout.extend([
@@ -1139,21 +1211,29 @@ class DynamicStimGui:
         self.download_csv_file(None)
         self.running_program(None)
         self.update_table_data(None)  # Update any GUI components as necessary after starting the stimulation
+        self.brainsboard.connect(self.port_selector.value)
+        print(self.setup_bb_map())
+        self.brainsboard.send_command(self.setup_bb_map())
         self.controller.start_stimulation()  # Assuming start_stimulation is implemented
+        self.brainsboard.close()
 
         
 
     def update_table_data(self, event):
+        if not self.final_tab_active:
+        # If the tab is not active, skip the update
+            return
         # Initialize data collection
+        #self.on_any_change(None)
         total_event_duration_in_us = self._calculate_total_event_duration()
         recommended_unit, converted_duration = self._convert_duration_and_unit(total_event_duration_in_us)
-
+        comment = self.comment_input.value
         # Update the data dictionary with calculated values
         data = {
             "Parameter": [
                 "Waveform", "Voltage or Current", "Amplitude", "Pulse Duration",
                 "Phase", self.period_frequency_group.value, "Event Count",
-                "Event Duration", "External Triggering", "Total Trains",
+                "Time Between Events", "External Triggering", "Total Trains",
                 "Time Between Trains", "External Signal Duration", "Comments"
             ],
             "Value": [
@@ -1164,12 +1244,12 @@ class DynamicStimGui:
                 self.phase_text.object if self.phase_text.visible else "N/A",
                 f"{self.period_frequency_value_input.value} {self.period_frequency_unit_selector.value if self.period_frequency_group.visible else 'N/A'}",
                 self.number_of_events_input.value,
-                f"{converted_duration} {recommended_unit}",
+                f"{self.duration_between_events_slider.value} {recommended_unit}",
                 "Yes" if self.accept_external_trigger.value else "No",
                 self.number_of_trains_input.value,
                 f"{self.train_duration_slider.value} {self.train_duration_unit_selector.value}",
                 f"{self.external_trigger_duration.value} {self.external_trigger_duration_unit_selector.value}",
-                self.comment_input.value
+                comment
             ]
             }
 
@@ -1186,7 +1266,8 @@ class DynamicStimGui:
         # Create DataFrame and update the table
         self.df = pd.DataFrame(data)
         self.table.object = self.df#.to_dict('list')  # Update the DataFrame widget with new data
-
+    def comment_added(self, event):
+        self.update_table_data(None)
     def load_settings_from_file(self, event):
         # Parse the uploaded file's content
         file_val = self.upload_settings_button.value
@@ -1225,7 +1306,7 @@ class DynamicStimGui:
     def running_program(self, event=None):
         self.dynamic_finalize_layout.clear()
         self.dynamic_finalize_layout.extend([
-            pn.pane.Markdown('You are almost there! Set the file location for your .csv file.'),
+            pn.pane.Markdown('Running file.'),
             self.back_button,
             pn.Row(self.progress_bar, self.progress_percent),
             self.debugger,
@@ -1241,6 +1322,8 @@ class DynamicStimGui:
 
 # To use the class and display the GUI in a notebook or as a Panel app
 stim_gui = DynamicStimGui(logger=logger)
+brainsboard = BRAINSBoard(stim_gui, logger=logger)
 controller = STGDeviceController(stim_gui, logger=logger)
 stim_gui.controller = controller
+stim_gui.brainsboard = brainsboard
 stim_gui.show().servable().show('Stimulation Gui')
