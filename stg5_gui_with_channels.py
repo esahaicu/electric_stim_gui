@@ -19,6 +19,7 @@ from typing import Tuple, List
 
 from System import Action
 from System import *
+from time import perf_counter_ns
 
 #change this path to the McsUsbNet for your computer
 clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
@@ -135,7 +136,7 @@ class STGDeviceController:
         self.stim_amplitude_arr.append(0)
         self.stim_duration_arr.append(delay_duration)
     @staticmethod
-    def prepare_device_data(self, amplitude_arr, duration_arr):
+    def prepare_device_data(amplitude_arr, duration_arr):
         encoded_amplitude = []
         for amp in amplitude_arr:
             magnitude = abs(amp) & 0xFFF
@@ -148,12 +149,16 @@ class STGDeviceController:
 
             # Convert encoded_value to int for formatting purposes
             formatted_value = (encoded_value)
-            self.logger.debug(f"Encoded: {formatted_value} | Binary: {formatted_value:016b}")
+            print(f"Encoded: {formatted_value} | Binary: {formatted_value:016b}")
             encoded_amplitude.append(encoded_value)
 
         pData = Array[UInt16](UInt16(d) for d in encoded_amplitude)
         tData = Array[UInt64]([UInt64(int(d)) for d in duration_arr])
         return pData, tData
+    def update_progress(self, progress):
+    # Assuming self.gui.progress_bar is the progress bar widget
+        self.gui.progress_bar.value = int(progress)
+        self.gui.progress_percent.value = int(progress)
     def configure_device_and_send_data(self, device):
         # Generate stimulation and synchronization data based on input parameters
         config = self.channel_data()
@@ -199,7 +204,16 @@ class STGDeviceController:
         
         # Wait for stimulation to complete based on the duration (simplified)
         total_duration = (sum(self.stim_duration_arr)/1000000) #+ 0.00001  # Convert µs to seconds
-        time.sleep(total_duration)
+        total_duration_ns = sum(self.stim_duration_arr) * 1000
+        start_time_ns = perf_counter_ns()
+        while True:
+            elapsed_time_ns = perf_counter_ns() - start_time_ns
+            progress = min(100, (elapsed_time_ns / total_duration_ns) * 100)  # Calculate progress
+            # Update the GUI progress bar; ensure this operation is thread-safe
+            self.update_progress(progress)
+
+            if elapsed_time_ns >= total_duration_ns:
+                break  # Exit the loop once the total duration is reached
         device.SendStop(1)
         self.logger.debug("Stimulation completed. Disconnecting from device.")
         device.Disconnect()
@@ -295,13 +309,17 @@ class DynamicStimGui:
         self._connect_callbacks()
         self._setup_finalize_tab()
         self._setup_logging_and_debugger()
+
         #self.upload_old_settings_button = pn.widgets.FileInput(accept='.json', name='Upload Old Settings')
 
     def _setup_logging_and_debugger(self):
         # Setup logging and debugger as before
         self.debugger = pn.widgets.Debugger(name='My Debugger', level=logging.DEBUG, 
                                             logger_names=['my_app_logger'], 
-                                            formatter_args={'fmt':'%(asctime)s [%(name)s - %(levelname)s]: %(message)s'})    
+                                            formatter_args={'fmt':'%(asctime)s [%(name)s - %(levelname)s]: %(message)s'})
+        self.progress_bar = pn.indicators.Progress(name='Progress', value=0, max=100, width = 500, visible=False, bar_color='success')  # Progress bar initialization
+        self.progress_percent = pn.indicators.Number(name='Progress', value=0, format='{value}%', title_size = '12pt', font_size= '18pt',
+                                                     colors=[(33, 'red'), (66, 'gold'), (100, 'green')], visible=False)
     def _setup_widgets(self):
 
         ### THIS IS THE SECTION THAT DEFINES THE EVENT SELECTION
@@ -945,7 +963,6 @@ class DynamicStimGui:
         self.download_dat.on_click(self.download_dat_file)
         self.start_run.on_click(self.run_stimulation)
         self.upload_settings_button.param.watch(self.load_settings_from_file, 'value')
-        
         #self.debug.param.watch(self.running_program())
         
         self.dynamic_finalize_layout = pn.Column(
@@ -960,8 +977,8 @@ class DynamicStimGui:
         self.finalize_tab_layout = pn.Row(self.table, self.dynamic_finalize_layout)
         #self.update_table_data(None)
         self.on_any_change(None)
-        self.tabs.append(('Finalize', self.finalize_tab_layout))
-
+        self.tabs.append(('Finalize', self.finalize_tab_layout))        
+        
     def set_configuration(self, event):
         self.dynamic_finalize_layout.clear()
         self.dynamic_finalize_layout.extend([
@@ -1210,11 +1227,17 @@ class DynamicStimGui:
         self.dynamic_finalize_layout.extend([
             pn.pane.Markdown('You are almost there! Set the file location for your .csv file.'),
             self.back_button,
-            self.debugger
+            pn.Row(self.progress_bar, self.progress_percent),
+            self.debugger,
         ])
         self.back_button.visible = True
         self.debugger.visible = True
+        self.progress_bar.visible = True
+        self.progress_percent.visible = True
         logger.debug("This is a test debug message.")
+
+    def show(self):
+        return self.tabs
 
 # To use the class and display the GUI in a notebook or as a Panel app
 stim_gui = DynamicStimGui(logger=logger)
