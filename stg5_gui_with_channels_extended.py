@@ -181,7 +181,10 @@ class STGDeviceController:
         pData, tData = self.prepare_device_data(self.stim_amplitude_arr, self.stim_duration_arr)
         sync_pData = Array[UInt16]([UInt16(v) for v in self.sync_amplitude_arr])
         sync_tData = Array[UInt64]([UInt64(int(d)) for d in self.sync_duration_arr])
-
+        syncout_start = [1,0]
+        syncout_start_dur = [500,100]
+        sync_start_pData = Array[UInt16]([UInt16(v) for v in syncout_start])
+        sync_start_tData = Array[UInt64]([UInt64(int(d)) for d in syncout_start_dur])
         # Configure the device mode based on modulation type
         if config["modulation_type_group"].lower() == 'current':
             device.SetCurrentMode()
@@ -189,16 +192,27 @@ class STGDeviceController:
             device.SetVoltageMode()
         # Setup triggers, assuming the device supports configuring multiple triggers
         trigger_inputs = device.GetNumberOfTriggerInputs()
-        channelmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Activate the first channel
-        syncoutmap = Array[UInt32]([1] + [0] * (trigger_inputs - 1))  # Sync signal for synchronization
+        channelmap = Array[UInt32]([1] + [2] + [0] * (trigger_inputs - 2))  # Activate the first channel
+        syncoutmap = Array[UInt32]([1] + [2] + [0] * (trigger_inputs - 2))  # Sync signal for synchronization
+        #start_channelmap = Array[UInt32]([2] + [0] * (trigger_inputs - 1))
+        #start_syncoutmap = Array[UInt32]([2] + [0] * (trigger_inputs - 1))
+        start_repeat = Array[UInt32]([1] + [0] * (trigger_inputs - 1))
+
         repeat = Array[UInt32]([0] * trigger_inputs)  # Infinite repeat for simplicity
         self.logger.debug(channelmap)
+        device.SetupTrigger(UInt32(1), channelmap, syncoutmap, start_repeat)
         device.SetupTrigger(UInt32(0), channelmap, syncoutmap, repeat)
 
         # Clear any previous data on the channel and sync output
+        device.ClearChannelData(UInt32(1))
+        device.ClearSyncData(UInt32(1))
+        device.SendSyncData(UInt32(1), sync_start_pData, sync_start_tData)
+        device.SendStart(UInt32(2))
+        time.sleep(0.001)
+        self.logger.debug('Sending Pulses!')
+        device.SendStop(UInt32(2))
         device.ClearChannelData(UInt32(0))
         device.ClearSyncData(UInt32(0))
-
         # Send stimulation data to the device
         device.SendChannelData(UInt32(0), pData, tData)
 
@@ -210,7 +224,6 @@ class STGDeviceController:
         device.SendStart(UInt32(1))
 
         self.logger.debug("Stimulation started. Please wait for completion...")
-        
         # Wait for stimulation to complete based on the duration (simplified)
         total_duration = (sum(self.stim_duration_arr)/1000000) #+ 0.00001  # Convert µs to seconds
         total_duration_ns = sum(self.stim_duration_arr) * 1000
