@@ -22,7 +22,8 @@ from System import *
 from time import perf_counter_ns
 
 #change this path to the McsUsbNet for your computer
-clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+clr.AddReference(r"C:\Users\denma\Desktop\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+#clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
 
 from Mcs.Usb import CMcsUsbListNet
 from Mcs.Usb import DeviceEnumNet
@@ -93,8 +94,8 @@ class STGDeviceController:
     def convert_to_micro(self, value, unit_type):
         unit_conversion_factors = {
             'us': 1, 'ms': 1000, 's': 1000000,
-            'uA': 1, 'mA': 1000, 'A': 1000000,
-            'uV': 0.001, 'mV': 1, 'V': 1000,
+            'uA': 1000, 'mA': 1000000, 'A': 1000000000,
+            'uV': 1, 'mV': 1000, 'V': 1000000,
         }
         return value * unit_conversion_factors.get(unit_type, 1)
 
@@ -214,8 +215,11 @@ class STGDeviceController:
         device.ClearChannelData(UInt32(0))
         device.ClearSyncData(UInt32(0))
         # Send stimulation data to the device
-        device.SendChannelData(UInt32(0), pData, tData)
-
+        #device.SendChannelData(UInt32(0), pData, tData)
+        if config["modulation_type_group"].lower() == 'current':
+            device.PrepareAndSendData(0, self.stim_amplitude_arr, self.stim_duration_arr,STG_DestinationEnumNet.channeldata_current)
+        else:
+            device.PrepareAndSendData(0, self.stim_amplitude_arr, self.stim_duration_arr,STG_DestinationEnumNet.channeldata_voltage)
         # For synchronization signal, assuming simple on/off logic
         #self.logger.debug(sync_pData)
         device.SendSyncData(UInt32(0), sync_pData, sync_tData)
