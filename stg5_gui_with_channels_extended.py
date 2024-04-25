@@ -22,8 +22,8 @@ from System import *
 from time import perf_counter_ns
 
 #change this path to the McsUsbNet for your computer
-clr.AddReference(r"C:\Users\denma\Desktop\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
-#clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+#clr.AddReference(r"C:\Users\denma\Desktop\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
+clr.AddReference(r"C:\Users\denma\Documents\GitHub\McsUsbNet_Examples-master\McsUsbNet\x64\McsUsbNet.dll")
 
 from Mcs.Usb import CMcsUsbListNet
 from Mcs.Usb import DeviceEnumNet
